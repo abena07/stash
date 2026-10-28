@@ -19,6 +19,15 @@ migrations in `migrations/` apply automatically on startup.
 
 in the discord developer portal, enable the **message content** intent for the bot, and invite it with the `bot` and `applications.commands` scopes. set `DEV_GUILD_ID` to your test server so slash commands show up instantly.
 
+make a channel named `#read-later` and give the bot **view channel**, **send messages**, **add reactions** and **read message history** there. any link posted in it is saved: 🔖 means saved, 🔁 means it's already in your queue.
+
+## tests
+
+```sh
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## deploy to railway
 
 1. create a project from this repo and add a postgres service.
