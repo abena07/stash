@@ -163,3 +163,49 @@ def test_read_links_are_not_dropped(database):
         return await drops.run_due_drops(pool, at("2026-11-18 09:01"), get_channel)
 
     assert loop.run_until_complete(go()) == 0 and channel.sent == []
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("wed sun", [3, 7]),
+        ("Sunday, Wednesday", [3, 7]),
+        ("mon and fri", [1, 5]),
+        ("tues/thurs", [2, 4]),
+        ("weekdays", [1, 2, 3, 4, 5]),
+        ("weekends", [6, 7]),
+        ("daily", [1, 2, 3, 4, 5, 6, 7]),
+        ("every day", [1, 2, 3, 4, 5, 6, 7]),
+        ("sat sat", [6]),
+    ],
+)
+def test_parse_days(text, expected):
+    assert drops.parse_days(text) == expected
+
+
+@pytest.mark.parametrize("text", ["", "funday", "wed, someday"])
+def test_parse_days_rejects_junk(text):
+    with pytest.raises(ValueError):
+        drops.parse_days(text)
+
+
+def test_describe_schedule():
+    assert drops.describe_schedule([7, 3], 9, "UTC") == "wednesday and sunday at 09:00 (UTC)"
+    assert drops.describe_schedule([1], 18, "Africa/Accra") == "monday at 18:00 (Africa/Accra)"
+
+
+def test_on_demand_picks_are_recorded_and_repeatable(database):
+    loop, pool = database
+    channel = FakeChannel()
+
+    async def go():
+        await seed(pool)
+        links = await drops.unread_links(pool, 1, 10)
+        first = await drops.send_on_demand(pool, channel, 1, 10, links[:2], "📬 your picks")
+        second = await drops.send_on_demand(pool, channel, 1, 10, links[:1], "🎲 a random pick")
+        drop_count = await pool.fetchval("SELECT count(*) FROM drops WHERE sent_at IS NOT NULL")
+        item_count = await pool.fetchval("SELECT count(*) FROM drop_items")
+        return first, second, drop_count, item_count
+
+    assert loop.run_until_complete(go()) == (2, 1, 2, 3)
+    assert channel.sent[0] == "📬 your picks" and channel.sent[3] == "🎲 a random pick"

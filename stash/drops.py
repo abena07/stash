@@ -8,6 +8,7 @@ send the same drop twice. failed drops are not retried yet (#16).
 import logging
 import math
 import random
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Awaitable, Callable, Protocol
@@ -134,18 +135,37 @@ async def run_due_drops(
 
 async def _send_drop(pool, channel: Channel, drop_id: int, guild_id: int, user_id: int,
                      slot: datetime, now: datetime, rng) -> bool:
+    picks = pick(await unread_links(pool, guild_id, user_id), now, rng=rng)
+    if not picks:
+        return False
+    header = f"📬 <@{user_id}> your {DAY_NAMES[slot.isoweekday()]} picks"
+    return await post_picks(pool, channel, drop_id, guild_id, picks, header) > 0
+
+
+async def send_on_demand(pool, channel: Channel, guild_id: int, user_id: int, picks: list[Candidate],
+                         header: str) -> int:
+    """post picks asked for with a command. recorded as a drop so reactions map back to the links."""
+    drop_id = await pool.fetchval(
+        "INSERT INTO drops (guild_id, user_id, scheduled_for) VALUES ($1, $2, clock_timestamp()) RETURNING id",
+        guild_id, user_id,
+    )
+    return await post_picks(pool, channel, drop_id, guild_id, picks, header)
+
+
+async def unread_links(pool, guild_id: int, user_id: int) -> list[Candidate]:
     rows = await pool.fetch(
         """SELECT id, url, title, reading_minutes, times_sent, created_at FROM links
            WHERE guild_id = $1 AND user_id = $2 AND status = 'unread'""",
         guild_id, user_id,
     )
-    picks = pick([Candidate(**dict(r)) for r in rows], now, rng=rng)
-    if not picks:
-        return False
+    return [Candidate(**dict(r)) for r in rows]
 
-    day = DAY_NAMES[slot.isoweekday()]
+
+async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks: list[Candidate],
+                     header: str) -> int:
+    """post a header and one message per pick, then record what was sent. returns picks posted."""
     mention = discord.AllowedMentions(users=True, everyone=False, roles=False)
-    await channel.send(f"📬 <@{user_id}> your {day} picks", allowed_mentions=mention)
+    await channel.send(header, allowed_mentions=mention)
     posted = []  # (link id, message id)
     for n, link in enumerate(picks, 1):
         try:
@@ -155,7 +175,7 @@ async def _send_drop(pool, channel: Channel, drop_id: int, guild_id: int, user_i
             continue
         posted.append((link.id, msg.id))
     if not posted:
-        return False
+        return 0
 
     async with pool.acquire() as conn, conn.transaction():
         await conn.executemany(
@@ -168,4 +188,30 @@ async def _send_drop(pool, channel: Channel, drop_id: int, guild_id: int, user_i
         )
         await conn.execute("UPDATE drops SET sent_at = now() WHERE id = $1", drop_id)
     log.info("guild %s: sent drop %s with %d link(s)", guild_id, drop_id, len(posted))
-    return True
+    return len(posted)
+
+
+DAY_ALIASES = {name: n for n, name in DAY_NAMES.items()} | {name[:3]: n for n, name in DAY_NAMES.items()} | {
+    "tues": 2, "thur": 4, "thurs": 4,
+}
+
+
+def parse_days(text: str) -> list[int]:
+    """'wed, sun' or 'monday friday' → iso weekdays. raises ValueError on anything else."""
+    words = [w for w in re.split(r"[\s,/&+]+", text.lower()) if w and w != "and"]
+    if words in (["weekdays"], ["weekends"], ["everyday"], ["every", "day"], ["daily"]):
+        return {"weekdays": [1, 2, 3, 4, 5], "weekends": [6, 7]}.get(words[0], list(range(1, 8)))
+    days = set()
+    for w in words:
+        if w not in DAY_ALIASES:
+            raise ValueError(f"i don't know the day {w!r}")
+        days.add(DAY_ALIASES[w])
+    if not days:
+        raise ValueError("give at least one day")
+    return sorted(days)
+
+
+def describe_schedule(days: list[int], hour: int, tz_name: str) -> str:
+    names = [DAY_NAMES[d] for d in sorted(days)]
+    when = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    return f"{when} at {hour:02d}:00 ({tz_name})"
