@@ -1,14 +1,11 @@
-import asyncio
 import itertools
-import os
 import random
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-import asyncpg
 import pytest
 
-from stash import db, drops
+from stash import drops
 from stash.drops import Candidate, due_slot, latest_slot, pick
 
 UTC = timezone.utc
@@ -78,34 +75,24 @@ def test_format_pick_falls_back_to_site_name():
 
 # ---- against a real postgres (skipped when none is running) ----
 
-TEST_DSN = os.environ.get("TEST_DATABASE_URL", "postgresql://localhost/stash_test")
-
-
 class FakeChannel:
     def __init__(self):
         self.sent: list[str] = []
+        self.reactions: list[tuple[int, str]] = []
         self._ids = itertools.count(1000)
 
     async def send(self, content, **kwargs):
         self.sent.append(content)
-        return type("Msg", (), {"id": next(self._ids)})()
+        return FakeMessage(next(self._ids), self)
 
 
-@pytest.fixture
-def database():
-    async def connect():
-        try:
-            pool = await db.connect(TEST_DSN)
-        except (OSError, asyncpg.PostgresError) as e:
-            pytest.skip(f"no test database: {e}")
-        await pool.execute("TRUNCATE guilds CASCADE")
-        return pool
+class FakeMessage:
+    def __init__(self, id, channel):
+        self.id = id
+        self.channel = channel
 
-    loop = asyncio.new_event_loop()
-    pool = loop.run_until_complete(connect())
-    yield loop, pool
-    loop.run_until_complete(pool.close())
-    loop.close()
+    async def add_reaction(self, emoji):
+        self.channel.reactions.append((self.id, emoji))
 
 
 async def seed(pool, guild_id=1, user_id=10, links=3):
@@ -144,6 +131,7 @@ def test_drop_is_sent_once_and_recorded(database):
     assert sent_counts == [1, 1, 0]
     assert channel.sent[0] == "📬 <@10> your wednesday picks"
     assert len(channel.sent) == 3 and "4 min read" in channel.sent[1]
+    assert channel.reactions == []  # the person reacts, the bot doesn't pre-fill
 
 
 def test_no_drop_outside_drop_days(database):

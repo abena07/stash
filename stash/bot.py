@@ -9,7 +9,7 @@ from .config import Config
 
 log = logging.getLogger(__name__)
 
-EXTENSIONS = ["stash.cogs.core", "stash.cogs.links", "stash.cogs.drops"]
+EXTENSIONS = ["stash.cogs.core", "stash.cogs.links", "stash.cogs.drops", "stash.cogs.reactions"]
 
 
 class StashBot(commands.Bot):
