@@ -1,9 +1,12 @@
+import asyncio
 import logging
 
+import aiohttp
 import asyncpg
 import discord
 from discord.ext import commands
 
+from .. import metadata
 from ..urls import extract_urls, normalize
 
 log = logging.getLogger(__name__)
@@ -11,6 +14,7 @@ log = logging.getLogger(__name__)
 READ_LATER_CHANNEL = "read-later"
 SAVED = "🔖"
 ALREADY_QUEUED = "🔁"
+FETCH_CONCURRENCY = 4
 
 
 def is_read_later(channel: discord.abc.Messageable) -> bool:
@@ -21,13 +25,13 @@ def is_read_later(channel: discord.abc.Messageable) -> bool:
 
 async def save_links(
     pool: asyncpg.Pool, message: discord.Message, urls: list[str]
-) -> tuple[list[int], list[asyncpg.Record]]:
-    """store urls for the message author. returns (new link ids, existing rows for duplicates)."""
+) -> tuple[list[tuple[int, str]], list[asyncpg.Record]]:
+    """store urls for the message author. returns ((id, url) of new links, existing rows for duplicates)."""
     by_key = {}
     for url in urls:
         by_key.setdefault(normalize(url), url)
 
-    new_ids, dupes = [], []
+    new, dupes = [], []
     async with pool.acquire() as conn, conn.transaction():
         for key, url in by_key.items():
             link_id = await conn.fetchval(
@@ -38,7 +42,7 @@ async def save_links(
                 message.guild.id, message.author.id, url, key, message.id,
             )
             if link_id is not None:
-                new_ids.append(link_id)
+                new.append((link_id, url))
                 continue
             dupes.append(
                 await conn.fetchrow(
@@ -47,7 +51,7 @@ async def save_links(
                     message.guild.id, message.author.id, key,
                 )
             )
-    return new_ids, dupes
+    return new, dupes
 
 
 class ReaddButton(
@@ -100,6 +104,18 @@ class ReaddButton(
 class Links(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.http: aiohttp.ClientSession | None = None
+        self._fetch_slots = asyncio.Semaphore(FETCH_CONCURRENCY)
+        self._tasks: set[asyncio.Task] = set()  # strong refs so tasks aren't garbage collected
+
+    async def cog_load(self) -> None:
+        self.http = metadata.make_session()
+
+    async def cog_unload(self) -> None:
+        for task in self._tasks:
+            task.cancel()
+        await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self.http.close()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -109,18 +125,39 @@ class Links(commands.Cog):
         if not urls:
             return  # plain chat in the channel is fine
 
-        new_ids, dupes = await save_links(self.bot.pool, message, urls)
+        new, dupes = await save_links(self.bot.pool, message, urls)
         log.info(
-            "guild %s: saved %d link(s), %d duplicate(s)", message.guild.id, len(new_ids), len(dupes)
+            "guild %s: saved %d link(s), %d duplicate(s)", message.guild.id, len(new), len(dupes)
         )
+        for link_id, url in new:
+            task = asyncio.create_task(self._fill_metadata(link_id, url))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
 
-        if new_ids:
+        if new:
             await _react(message, SAVED)
         if any(d["status"] == "unread" for d in dupes):
             await _react(message, ALREADY_QUEUED)
         for dupe in dupes:
             if dupe["status"] != "unread":
                 await _ask_readd(message, dupe)
+
+    async def _fill_metadata(self, link_id: int, url: str) -> None:
+        """runs after the link is saved; on any failure the link just keeps no metadata."""
+        try:
+            async with self._fetch_slots:
+                meta = await metadata.fetch(self.http, url)
+            if meta is None:
+                return
+            await self.bot.pool.execute(
+                """UPDATE links SET title = $2, description = $3, reading_minutes = $4
+                   WHERE id = $1""",
+                link_id, meta.title, meta.description, meta.reading_minutes,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("metadata fetch for link %s failed", link_id)
 
 
 async def _react(message: discord.Message, emoji: str) -> None:
