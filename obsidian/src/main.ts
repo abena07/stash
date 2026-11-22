@@ -24,7 +24,7 @@ const DEFAULTS: Settings = {
   intervalMinutes: 30,
   roundupFolder: "roundups",
   roundupCount: 7,
-  roundupNotes: true,
+  roundupNotes: false, // notes are private in discord; a roundup is public, so opt in
 };
 
 interface Saved {
@@ -255,7 +255,8 @@ class StashSettings extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName("Include my notes")
-      .setDesc("adds your first note on each link as a short comment.")
+      .setDesc("off by default: your notes are private in discord, and a roundup is meant to be published. "
+        + "turn on to add your first note on each link as a short comment.")
       .addToggle((t) => t.setValue(s.roundupNotes).onChange(async (v) => {
         s.roundupNotes = v;
         await this.plugin.persist();
