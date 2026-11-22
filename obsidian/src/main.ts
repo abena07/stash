@@ -1,5 +1,6 @@
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFile, normalizePath, requestUrl } from "obsidian";
 import { Action, RemoteFile, State, nextState, plan, summary } from "./sync.ts";
+import * as roundup from "./roundup.ts";
 
 // the public stash bot. people who self-host change this in settings.
 const DEFAULT_SERVER = "https://api.stash.bennett-eghan.com";
@@ -10,6 +11,9 @@ interface Settings {
   folder: string;
   which: "read" | "loved" | "all";
   intervalMinutes: number;
+  roundupFolder: string;
+  roundupCount: number;
+  roundupNotes: boolean;
 }
 
 const DEFAULTS: Settings = {
@@ -18,6 +22,9 @@ const DEFAULTS: Settings = {
   folder: "stash",
   which: "read",
   intervalMinutes: 30,
+  roundupFolder: "roundups",
+  roundupCount: 7,
+  roundupNotes: true,
 };
 
 interface Saved {
@@ -37,6 +44,14 @@ export default class StashPlugin extends Plugin {
     this.state = saved.state ?? {};
 
     this.addCommand({ id: "sync-now", name: "Sync now", callback: () => this.sync(true) });
+    this.addCommand({
+      id: "roundup-last-month", name: "Make monthly roundup (last month)",
+      callback: () => this.makeRoundup(roundup.monthOf(new Date(), -1)),
+    });
+    this.addCommand({
+      id: "roundup-this-month", name: "Make monthly roundup (this month so far)",
+      callback: () => this.makeRoundup(roundup.monthOf(new Date(), 0)),
+    });
     this.addSettingTab(new StashSettings(this.app, this));
     this.app.workspace.onLayoutReady(() => this.sync(false));
     this.schedule();
@@ -72,13 +87,41 @@ export default class StashPlugin extends Plugin {
       this.state = nextState(this.state, actions);
       await this.persist();
       const changed = actions.some((a) => !["unchanged"].includes(a.kind));
-      if (loud || changed) new Notice(summary(actions));
+      if (loud || changed) new Notice(summary(actions), 8000);
     } catch (err) {
       console.error("stash sync failed", err);
-      if (loud) new Notice(`stash: ${err instanceof Error ? err.message : "sync failed"}`);
+      if (loud) new Notice(`stash: ${err instanceof Error ? err.message : "sync failed"}`, 8000);
     } finally {
       this.syncing = false;
     }
+  }
+
+  async makeRoundup(month: string) {
+    const vault = this.app.vault;
+    const folder = normalizePath(this.settings.folder);
+    const files = vault.getMarkdownFiles().filter((f) => f.path.startsWith(`${folder}/`));
+    const entries = (await Promise.all(files.map(async (f) => roundup.parseStashFile(await vault.read(f)))))
+      .filter((e): e is roundup.Entry => e !== null);
+    const picked = roundup.pick(entries, month, this.settings.roundupCount);
+    if (picked.length === 0) {
+      new Notice(`stash: nothing read in ${roundup.monthName(month)} yet. links need ✅ in discord, then a sync.`, 8000);
+      return;
+    }
+
+    const outFolder = normalizePath(this.settings.roundupFolder || "roundups");
+    const path = normalizePath(`${outFolder}/${roundup.fileName(month)}`);
+    const existing = vault.getAbstractFileByPath(path);
+    if (existing instanceof TFile) {
+      // never overwrite: you may have edited it already
+      new Notice(`stash: the ${roundup.monthName(month)} roundup already exists, opening it.`, 8000);
+      await this.app.workspace.getLeaf(true).openFile(existing);
+      return;
+    }
+    if (!vault.getAbstractFileByPath(outFolder)) await vault.createFolder(outFolder);
+    const text = roundup.render(picked, month, roundup.postDate(month, new Date()), this.settings.roundupNotes);
+    const file = await vault.create(path, text);
+    await this.app.workspace.getLeaf(true).openFile(file);
+    new Notice(`stash: made your ${roundup.monthName(month)} roundup with ${picked.length} link${picked.length === 1 ? "" : "s"}.`, 8000);
   }
 
   private async fetchFiles(): Promise<RemoteFile[]> {
@@ -186,5 +229,36 @@ class StashSettings extends PluginSettingTab {
 
     new Setting(containerEl)
       .addButton((b) => b.setButtonText("Sync now").setCta().onClick(() => this.plugin.sync(true)));
+
+    new Setting(containerEl).setName("Monthly roundup").setHeading();
+    containerEl.createEl("p", {
+      text: "run \"stash: make monthly roundup\" from the command palette to turn a month's reads into a post "
+        + "for your site: loved links first, grouped by tag.",
+    });
+
+    new Setting(containerEl)
+      .setName("Roundup folder")
+      .addText((t) => t.setValue(s.roundupFolder).onChange(async (v) => {
+        s.roundupFolder = v.trim() || "roundups";
+        await this.plugin.persist();
+      }));
+
+    new Setting(containerEl)
+      .setName("Links per roundup")
+      .addText((t) => t.setValue(String(s.roundupCount)).onChange(async (v) => {
+        const n = Number.parseInt(v, 10);
+        if (Number.isFinite(n) && n >= 1) {
+          s.roundupCount = n;
+          await this.plugin.persist();
+        }
+      }));
+
+    new Setting(containerEl)
+      .setName("Include my notes")
+      .setDesc("adds your first note on each link as a short comment.")
+      .addToggle((t) => t.setValue(s.roundupNotes).onChange(async (v) => {
+        s.roundupNotes = v;
+        await this.plugin.persist();
+      }));
   }
 }
