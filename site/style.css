@@ -1,18 +1,18 @@
 :root {
-  --frame: #ffffff;        /* white band around the page */
-  --paper: #ffffff;        /* white */
-  --ink: #111111;          /* black text */
-  --muted: #8a8a8a;        /* grey secondary text */
-  --rule: #e8e8e8;         /* thin dividers */
-  --button: #111111;       /* black pill */
-  --button-ink: #ffffff;
-  --soft: #f4f4f4;         /* light pill */
-  --soft-edge: #e4e4e4;
+  --frame: #fbf4eb;        /* same as the page: no border */
+  --paper: #fbf4eb;        /* soft warm cream */
+  --ink: #3e2a24;          /* dark brown text */
+  --muted: #9c8b82;        /* taupe secondary text */
+  --rule: #e6dcd2;         /* thin dividers */
+  --button: #4e3832;       /* dark brown pill */
+  --button-ink: #fbf4eb;
+  --soft: #f3e8d8;         /* light pill */
+  --soft-edge: #e4d6c4;
   --lavender: #e3dafb;
   --sky: #c9defb;
   --butter: #f8df86;
   --mint: #cfe8d5;
-  --brand: #111111;        /* the little bookmark mark */
+  --brand: #4e3832;        /* the little bookmark mark */
   --radius: 28px;
   --column: 40rem;
 }
@@ -112,7 +112,7 @@ h2 { font-size: clamp(1.75rem, 4vw, 2.3rem); }
 }
 .pill:hover { transform: translateY(-1px); }
 .pill.dark { background: var(--button); color: var(--button-ink); }
-.pill.dark:hover { background: #333333; }
+.pill.dark:hover { background: #3f2c27; }
 .pill.light { background: var(--soft); color: var(--ink); border-color: var(--soft-edge); }
 .pill svg { width: 18px; height: 18px; }
 
