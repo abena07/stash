@@ -9,9 +9,9 @@ SLOT = datetime(2026, 11, 18, 9, tzinfo=timezone.utc)  # a wednesday
 
 
 def test_owner_message_is_plain():
-    text = alerts.owner_message("my server", SLOT, "i don't have permission to post in #read-later")
+    text = alerts.owner_message("my server", SLOT, "i don't have permission to post in the read-later channel")
     assert text.startswith("heads up: i couldn't send the wednesday drop in **my server**")
-    assert "i don't have permission to post in #read-later." in text
+    assert "i don't have permission to post in the read-later channel." in text
     assert "`/picks`" in text
 
 

@@ -129,9 +129,9 @@ def failure_reason(error: Exception) -> str:
     if isinstance(error, DropFailed):
         return error.reason
     if isinstance(error, discord.Forbidden):
-        return "i don't have permission to post in #read-later"
+        return "i don't have permission to post in the read-later channel"
     if isinstance(error, discord.NotFound):
-        return "the #read-later channel seems to have been deleted"
+        return "the read-later channel seems to have been deleted"
     if isinstance(error, discord.HTTPException):
         return f"discord rejected the message (error {error.status})"
     return "something went wrong on my side"
@@ -184,7 +184,7 @@ async def _attempt(pool, d, now: datetime, get_channel, alert: Alert | None, rng
     try:
         channel = await get_channel(guild_id)
         if channel is None:
-            raise DropFailed("i couldn't find a #read-later channel")
+            raise DropFailed("i couldn't find the read-later channel. set one with /setup channel")
         await _send_drop(pool, channel, d["id"], guild_id, user_id, slot, now, rng)
         return True
     except Exception as e:
@@ -320,7 +320,7 @@ def archive_note(links: list[Candidate]) -> str:
     count = "1 link" if len(links) == 1 else f"{len(links)} links"
     return (
         f"🗄️ archived {count} you didn't get to after {ARCHIVE_AFTER_SENDS} sends: {listed}. "
-        "post one in #read-later again to bring it back."
+        "post one in this channel again to bring it back."
     )
 
 

@@ -11,7 +11,6 @@ from ..urls import extract_urls, normalize
 
 log = logging.getLogger(__name__)
 
-READ_LATER_CHANNEL = "read-later"
 SAVED = "🔖"
 ALREADY_QUEUED = "🔁"
 FETCH_CONCURRENCY = 4
@@ -24,12 +23,6 @@ def thread_name(title: str | None, url: str) -> str:
     if len(name) > THREAD_NAME_LIMIT:
         name = name[: THREAD_NAME_LIMIT - 1].rstrip() + "…"
     return name
-
-
-def is_read_later(channel: discord.abc.Messageable) -> bool:
-    # threads are excluded on purpose: replies there are notes (#5).
-    # /setup (#8) will check guilds.read_later_channel_id here first.
-    return isinstance(channel, discord.TextChannel) and channel.name == READ_LATER_CHANNEL
 
 
 async def save_links(
@@ -143,7 +136,7 @@ class Links(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        if message.author.bot or message.guild is None or not is_read_later(message.channel):
+        if message.author.bot or message.guild is None or not await self.bot.read_later.is_read_later(message.channel):
             return
         urls = extract_urls(message.content)
         if not urls:

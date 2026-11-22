@@ -246,9 +246,9 @@ class Alerts:
 @pytest.mark.parametrize(
     "error, reason",
     [
-        (drops.DropFailed("i couldn't find a #read-later channel"), "i couldn't find a #read-later channel"),
-        (http_error(discord.Forbidden, 403), "i don't have permission to post in #read-later"),
-        (http_error(discord.NotFound, 404), "the #read-later channel seems to have been deleted"),
+        (drops.DropFailed("i couldn't find the read-later channel. set one with /setup channel"), "i couldn't find the read-later channel. set one with /setup channel"),
+        (http_error(discord.Forbidden, 403), "i don't have permission to post in the read-later channel"),
+        (http_error(discord.NotFound, 404), "the read-later channel seems to have been deleted"),
         (http_error(discord.HTTPException, 500), "discord rejected the message (error 500)"),
         (RuntimeError("boom"), "something went wrong on my side"),
     ],
@@ -280,7 +280,7 @@ def test_failed_drop_retries_3_times_then_alerts_once(database):
     assert sent == 0
     assert drop["attempts"] == 4 and drop["failed_at"] == at("2026-11-18 09:15")  # 09:00 + 3 × 5 min
     assert "Forbidden" in drop["last_error"]
-    assert alert.calls == [(1, 10, at("2026-11-18 09:00"), "i don't have permission to post in #read-later")]
+    assert alert.calls == [(1, 10, at("2026-11-18 09:00"), "i don't have permission to post in the read-later channel")]
 
 
 def test_drop_that_recovers_on_retry_sends_once_without_alert(database):
@@ -307,7 +307,7 @@ def test_missing_channel_alerts_with_a_plain_reason(database):
         return None
 
     run_ticks(loop, pool, no_channel, alert, at("2026-11-18 09:00"), minutes=20)
-    assert [c[3] for c in alert.calls] == ["i couldn't find a #read-later channel"]
+    assert [c[3] for c in alert.calls] == ["i couldn't find the read-later channel. set one with /setup channel"]
 
 
 def test_two_instances_ticking_together_send_once(database):
@@ -423,7 +423,7 @@ def test_links_sent_3_times_are_archived_with_a_note(database):
     assert all("post 0" not in m and "post 1" not in m for m in picked)  # stale links aren't picked
     assert channel.sent[-1] == (
         "🗄️ archived 2 links you didn't get to after 3 sends: **post 0** and **post 1**. "
-        "post one in #read-later again to bring it back."
+        "post one in this channel again to bring it back."
     )
 
 

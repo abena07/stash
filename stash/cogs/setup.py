@@ -9,6 +9,25 @@ from .. import keys, modes, providers
 
 log = logging.getLogger(__name__)
 
+# what the bot needs in the read-later channel: save links, react, open notes threads, post picks
+NEEDED = {
+    "view_channel": "view channel",
+    "send_messages": "send messages",
+    "add_reactions": "add reactions",
+    "read_message_history": "read message history",
+    "create_public_threads": "create public threads",
+    "send_messages_in_threads": "send messages in threads",
+}
+
+
+def missing_permissions(channel: discord.abc.GuildChannel, me: discord.Member) -> str:
+    """the needed permissions the bot lacks in `channel`, as readable text ('' if none)."""
+    perms = channel.permissions_for(me)
+    missing = [f"**{label}**" for flag, label in NEEDED.items() if not getattr(perms, flag)]
+    if len(missing) <= 1:
+        return "".join(missing)
+    return ", ".join(missing[:-1]) + " and " + missing[-1]
+
 MODE_HELP = {
     modes.PERSONAL: "everyone has their own queue, and drops are sent to each person.",
     modes.SHARED: "everyone's links go into one pile, and each drop is one set of picks for the group, "
@@ -22,6 +41,7 @@ class Setup(commands.Cog):
 
     @app_commands.command(description="see or change how stash works in this server")
     @app_commands.describe(
+        channel="the channel where links are saved and picks are posted (default: #read-later)",
         mode="personal: everyone has their own queue. shared: one reading pile for the group",
         alerts="channel for alerts when a drop fails (otherwise the server owner gets a dm)",
         dm_alerts="go back to dming the server owner",
@@ -34,6 +54,7 @@ class Setup(commands.Cog):
     async def setup(
         self,
         interaction: discord.Interaction,
+        channel: discord.TextChannel | None = None,
         mode: app_commands.Choice[str] | None = None,
         alerts: discord.TextChannel | None = None,
         dm_alerts: bool = False,
@@ -42,10 +63,13 @@ class Setup(commands.Cog):
         guild = interaction.guild
         await pool.execute("INSERT INTO guilds (guild_id) VALUES ($1) ON CONFLICT DO NOTHING", guild.id)
 
-        if mode is None and alerts is None and not dm_alerts:
+        if channel is None and mode is None and alerts is None and not dm_alerts:
             row = await pool.fetchrow("SELECT mode, alert_channel_id FROM guilds WHERE guild_id = $1", guild.id)
             where = f"<#{row['alert_channel_id']}>" if row["alert_channel_id"] else "a dm to the server owner"
+            current = await self.bot.read_later.find(guild)
+            saving = current.mention if current else "**not set**: make a #read-later channel or use `/setup channel`"
             await interaction.response.send_message(
+                f"links are saved in {saving}.\n"
                 f"mode: **{row['mode']}**. {MODE_HELP[row['mode']]}\n"
                 f"if a drop fails, the alert goes to {where}.",
                 ephemeral=True,
@@ -58,6 +82,14 @@ class Setup(commands.Cog):
             )
             return
 
+        if channel is not None:
+            missing = missing_permissions(channel, guild.me)
+            if missing:
+                await interaction.response.send_message(
+                    f"i need {missing} in {channel.mention} first, then try again.", ephemeral=True
+                )
+                return
+
         if alerts is not None:
             perms = alerts.permissions_for(guild.me)
             if not (perms.view_channel and perms.send_messages):
@@ -69,6 +101,10 @@ class Setup(commands.Cog):
                 return
 
         done = []
+        if channel is not None:
+            await self.bot.read_later.choose(guild.id, channel.id)
+            log.info("guild %s: read-later channel set to %s", guild.id, channel.id)
+            done.append(f"links posted in {channel.mention} are saved now, and picks go there.")
         if mode is not None:
             await pool.execute("UPDATE guilds SET mode = $2 WHERE guild_id = $1", guild.id, mode.value)
             log.info("guild %s: mode set to %s", guild.id, mode.value)
