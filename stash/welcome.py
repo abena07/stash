@@ -17,8 +17,10 @@ CHOICES = {modes.PERSONAL: "just me", modes.SHARED: "our group"}
 
 
 def welcome_text(read_later: discord.abc.GuildChannel | None) -> str:
-    where = (f"post links in {read_later.mention}" if read_later
-             else "make a **#read-later** channel (or pick one with `/setup channel`) and post links there")
+    where = (f"post links in {read_later.mention} (or pick another channel with `/setup channel`)"
+             if read_later
+             else "pick the channel for links with `/setup channel`, or make a **#read-later** "
+                  "channel, and post links there")
     return (
         f"👋🏿 hi, i'm **stash**. {where}, and i'll save them, then bring two back every "
         "wednesday and sunday (change it with `/schedule`) so they actually get read.\n\n"

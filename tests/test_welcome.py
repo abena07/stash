@@ -28,9 +28,10 @@ def guild(read_later=None, system=None, others=()):
 
 
 def test_welcome_names_the_read_later_channel_or_says_how_to_make_one():
-    assert "post links in <#5>" in welcome.welcome_text(Channel(5))
+    with_channel = welcome.welcome_text(Channel(5))
+    assert "post links in <#5>" in with_channel and "/setup channel" in with_channel  # another channel is fine too
     text = welcome.welcome_text(None)
-    assert "make a **#read-later** channel" in text and "/setup channel" in text
+    assert "/setup channel" in text and "make a **#read-later** channel" in text
     assert "**just me**" in text and "**our group**" in text and "/setup mode" in text
 
 
