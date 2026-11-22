@@ -6,7 +6,7 @@ import asyncpg
 import discord
 from discord.ext import commands
 
-from .. import keys, metadata, providers, tagging
+from .. import keys, metadata, modes, providers, tagging
 from ..urls import extract_urls, normalize
 
 log = logging.getLogger(__name__)
@@ -35,14 +35,27 @@ def is_read_later(channel: discord.abc.Messageable) -> bool:
 async def save_links(
     pool: asyncpg.Pool, message: discord.Message, urls: list[str]
 ) -> tuple[list[tuple[int, str]], list[asyncpg.Record]]:
-    """store urls for the message author. returns ((id, url) of new links, existing rows for duplicates)."""
+    """store urls for the message author. returns ((id, url) of new links, existing rows for duplicates).
+
+    in a shared server a link anyone already saved is a duplicate: one pile, one copy of each link.
+    """
     by_key = {}
     for url in urls:
         by_key.setdefault(normalize(url), url)
 
+    shared = await modes.is_shared(pool, message.guild.id)
     new, dupes = [], []
     async with pool.acquire() as conn, conn.transaction():
         for key, url in by_key.items():
+            if shared:
+                existing = await conn.fetchrow(
+                    """SELECT id, url, status, created_at FROM links
+                       WHERE guild_id = $1 AND url_normalized = $2 ORDER BY id LIMIT 1""",
+                    message.guild.id, key,
+                )
+                if existing is not None:
+                    dupes.append(existing)
+                    continue
             link_id = await conn.fetchval(
                 """INSERT INTO links (guild_id, user_id, url, url_normalized, source_message_id)
                    VALUES ($1, $2, $3, $4, $5)
@@ -94,7 +107,7 @@ class ReaddButton(
         if owner_id is None:
             await interaction.response.edit_message(content="that link no longer exists", view=None)
             return
-        if owner_id != interaction.user.id:
+        if owner_id != interaction.user.id and not await modes.is_shared(pool, interaction.guild_id):
             await interaction.response.send_message("that's not your link", ephemeral=True)
             return
 
@@ -168,10 +181,12 @@ class Links(commands.Cog):
         provider = providers.PROVIDERS.get(g["ai_provider"]) if g else None
         if api_key is None or provider is None:
             return
+        # reuse the person's tags, or the whole pile's in a shared server
+        tag_owner = None if await modes.is_shared(self.bot.pool, guild_id) else user_id
         existing = [r["tag"] for r in await self.bot.pool.fetch(
             """SELECT DISTINCT unnest(tags) AS tag FROM links
-               WHERE guild_id = $1 AND user_id = $2 ORDER BY tag LIMIT 100""",
-            guild_id, user_id,
+               WHERE guild_id = $1 AND ($2::bigint IS NULL OR user_id = $2) ORDER BY tag LIMIT 100""",
+            guild_id, tag_owner,
         )]
         for link_id in link_ids:
             link = await self.bot.pool.fetchrow("SELECT url, title, description FROM links WHERE id = $1", link_id)
@@ -236,8 +251,8 @@ async def _ask_readd(message: discord.Message, link: asyncpg.Record) -> None:
     saved_on = discord.utils.format_dt(link["created_at"], "D")
     try:
         await message.reply(
-            f"you saved <{link['url']}> before ({saved_on}) and it's marked {link['status']}. "
-            "re-add it to your queue?",
+            f"<{link['url']}> was saved before ({saved_on}) and it's marked {link['status']}. "
+            "re-add it to the queue?",
             view=view,
             mention_author=False,
         )

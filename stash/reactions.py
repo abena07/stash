@@ -22,20 +22,21 @@ def action_for(emoji: str) -> str | None:
 
 
 async def apply(pool: asyncpg.Pool, guild_id: int, message_id: int, user_id: int,
-                action: str, added: bool) -> int:
-    """update the user's links behind this message. returns how many changed.
+                action: str, added: bool, shared: bool = False) -> int:
+    """update the links behind this message. returns how many changed.
 
-    works on a drop pick and on the user's original post in #read-later. only
-    the link's owner can change it, so a friend's reaction does nothing.
+    works on a drop pick and on the original post in #read-later. in a personal
+    server only the link's owner can change it, so a friend's reaction does
+    nothing. in a shared server anyone's reaction counts for the whole group.
     """
     link_ids = await pool.fetch(
         """SELECT l.id FROM drop_items i
              JOIN links l ON l.id = i.link_id
-            WHERE i.discord_message_id = $1 AND l.guild_id = $2 AND l.user_id = $3
+            WHERE i.discord_message_id = $1 AND l.guild_id = $2 AND ($4 OR l.user_id = $3)
            UNION
            SELECT id FROM links
-            WHERE source_message_id = $1 AND guild_id = $2 AND user_id = $3""",
-        message_id, guild_id, user_id,
+            WHERE source_message_id = $1 AND guild_id = $2 AND ($4 OR user_id = $3)""",
+        message_id, guild_id, user_id, shared,
     )
     ids = [r["id"] for r in link_ids]
     if not ids:

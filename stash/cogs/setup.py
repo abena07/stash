@@ -5,24 +5,36 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .. import keys, providers
+from .. import keys, modes, providers
 
 log = logging.getLogger(__name__)
+
+MODE_HELP = {
+    modes.PERSONAL: "everyone has their own queue, and drops are sent to each person.",
+    modes.SHARED: "everyone's links go into one pile, and each drop is one set of picks for the group, "
+                  "showing who saved each link. anyone's ✅ marks a link read for everyone.",
+}
 
 
 class Setup(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(description="see or change where the bot sends alerts about failed drops")
+    @app_commands.command(description="see or change how stash works in this server")
     @app_commands.describe(
+        mode="personal: everyone has their own queue. shared: one reading pile for the group",
         alerts="channel for alerts when a drop fails (otherwise the server owner gets a dm)",
         dm_alerts="go back to dming the server owner",
     )
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="personal (everyone has their own queue)", value=modes.PERSONAL),
+        app_commands.Choice(name="shared (one reading pile for the group)", value=modes.SHARED),
+    ])
     @app_commands.guild_only()
     async def setup(
         self,
         interaction: discord.Interaction,
+        mode: app_commands.Choice[str] | None = None,
         alerts: discord.TextChannel | None = None,
         dm_alerts: bool = False,
     ) -> None:
@@ -30,13 +42,13 @@ class Setup(commands.Cog):
         guild = interaction.guild
         await pool.execute("INSERT INTO guilds (guild_id) VALUES ($1) ON CONFLICT DO NOTHING", guild.id)
 
-        if alerts is None and not dm_alerts:
-            channel_id = await pool.fetchval(
-                "SELECT alert_channel_id FROM guilds WHERE guild_id = $1", guild.id
-            )
-            where = f"<#{channel_id}>" if channel_id else "a dm to the server owner"
+        if mode is None and alerts is None and not dm_alerts:
+            row = await pool.fetchrow("SELECT mode, alert_channel_id FROM guilds WHERE guild_id = $1", guild.id)
+            where = f"<#{row['alert_channel_id']}>" if row["alert_channel_id"] else "a dm to the server owner"
             await interaction.response.send_message(
-                f"if a drop fails, the alert goes to {where}.", ephemeral=True
+                f"mode: **{row['mode']}**. {MODE_HELP[row['mode']]}\n"
+                f"if a drop fails, the alert goes to {where}.",
+                ephemeral=True,
             )
             return
 
@@ -46,29 +58,29 @@ class Setup(commands.Cog):
             )
             return
 
+        if alerts is not None:
+            perms = alerts.permissions_for(guild.me)
+            if not (perms.view_channel and perms.send_messages):
+                await interaction.response.send_message(
+                    f"i can't post in {alerts.mention}. give me **view channel** and **send messages** "
+                    "there, then try again.",
+                    ephemeral=True,
+                )
+                return
+
+        done = []
+        if mode is not None:
+            await pool.execute("UPDATE guilds SET mode = $2 WHERE guild_id = $1", guild.id, mode.value)
+            log.info("guild %s: mode set to %s", guild.id, mode.value)
+            done.append(f"mode is now **{mode.value}**. {MODE_HELP[mode.value]}")
         if dm_alerts:
             await pool.execute("UPDATE guilds SET alert_channel_id = NULL WHERE guild_id = $1", guild.id)
-            await interaction.response.send_message(
-                "done. failed drop alerts will be dmed to the server owner.", ephemeral=True
-            )
-            return
-
-        perms = alerts.permissions_for(guild.me)
-        if not (perms.view_channel and perms.send_messages):
-            await interaction.response.send_message(
-                f"i can't post in {alerts.mention}. give me **view channel** and **send messages** "
-                "there, then try again.",
-                ephemeral=True,
-            )
-            return
-        await pool.execute(
-            "UPDATE guilds SET alert_channel_id = $2 WHERE guild_id = $1", guild.id, alerts.id
-        )
-        log.info("guild %s: alert channel set to %s", guild.id, alerts.id)
-        await interaction.response.send_message(
-            f"done. alerts about failed drops will go to {alerts.mention}.", ephemeral=True
-        )
-
+            done.append("failed drop alerts will be dmed to the server owner.")
+        elif alerts is not None:
+            await pool.execute("UPDATE guilds SET alert_channel_id = $2 WHERE guild_id = $1", guild.id, alerts.id)
+            log.info("guild %s: alert channel set to %s", guild.id, alerts.id)
+            done.append(f"alerts about failed drops will go to {alerts.mention}.")
+        await interaction.response.send_message("done. " + "\n".join(done), ephemeral=True)
 
     @app_commands.command(description="bring your own ai key (claude, openai, gemini, deepseek…) to tag links")
     @app_commands.describe(

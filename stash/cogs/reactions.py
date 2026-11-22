@@ -3,7 +3,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from .. import reactions
+from .. import modes, reactions
 
 log = logging.getLogger(__name__)
 
@@ -27,8 +27,9 @@ class Reactions(commands.Cog):
         action = reactions.action_for(str(payload.emoji))
         if action is None:
             return
+        shared = await modes.is_shared(self.bot.pool, payload.guild_id)
         changed = await reactions.apply(
-            self.bot.pool, payload.guild_id, payload.message_id, payload.user_id, action, added
+            self.bot.pool, payload.guild_id, payload.message_id, payload.user_id, action, added, shared
         )
         if changed:
             log.info(

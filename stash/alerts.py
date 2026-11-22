@@ -22,7 +22,7 @@ def owner_message(guild_name: str, slot: datetime, reason: str) -> str:
 
 def host_message(guild_name: str, guild_id: int, user_id: int, slot: datetime, reason: str) -> str:
     return (
-        f"drop failed · {guild_name} ({guild_id}) · user {user_id} · "
+        f"drop failed · {guild_name} ({guild_id}) · {'group drop' if user_id == 0 else f'user {user_id}'} · "
         f"slot {slot.isoformat()} · {reason}"
     )
 
