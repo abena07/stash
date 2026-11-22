@@ -30,6 +30,9 @@ RETRIES = 3
 RETRY_DELAY = timedelta(minutes=5)
 # how long one attempt holds a drop, so a slow attempt isn't started twice
 LEASE = timedelta(minutes=2)
+# unread links sent this many times are archived at the next scheduled drop (#12)
+ARCHIVE_AFTER_SENDS = 3
+ARCHIVE_NOTE_LIMIT = 5  # titles listed in the archive note before "and N more"
 # each tag a link shares with your loved links adds this much to its weight (up to 2 tags: ×3)
 LOVED_TAG_BOOST = 1.0
 MAX_BOOSTED_TAGS = 2
@@ -205,14 +208,17 @@ async def _attempt(pool, d, now: datetime, get_channel, alert: Alert | None, rng
 
 async def _send_drop(pool, channel: Channel, drop_id: int, guild_id: int, user_id: int,
                      slot: datetime, now: datetime, rng) -> None:
-    picks = pick(await unread_links(pool, guild_id, user_id), now, rng=rng,
-                 loved_tags=await loved_tags(pool, guild_id, user_id))
-    if not picks:
+    unread = await unread_links(pool, guild_id, user_id)
+    # sent ARCHIVE_AFTER_SENDS times and still not read: archive instead of sending again (#12)
+    stale = [link for link in unread if link.times_sent >= ARCHIVE_AFTER_SENDS]
+    fresh = [link for link in unread if link.times_sent < ARCHIVE_AFTER_SENDS]
+    picks = pick(fresh, now, rng=rng, loved_tags=await loved_tags(pool, guild_id, user_id))
+    if not picks and not stale:
         # everything was marked read since the slot was claimed: nothing to send, nothing failed
         await pool.execute("UPDATE drops SET sent_at = now() WHERE id = $1", drop_id)
         return
     header = f"📬 <@{user_id}> your {DAY_NAMES[slot.isoweekday()]} picks"
-    await post_picks(pool, channel, drop_id, guild_id, picks, header)
+    await post_picks(pool, channel, drop_id, guild_id, picks, header, archive=stale)
 
 
 async def send_on_demand(pool, channel: Channel, guild_id: int, user_id: int, picks: list[Candidate],
@@ -244,10 +250,13 @@ async def unread_links(pool, guild_id: int, user_id: int) -> list[Candidate]:
 
 
 async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks: list[Candidate],
-                     header: str) -> int:
+                     header: str, archive: list[Candidate] = ()) -> int:
     """post a header and one message per pick, then record what was sent. returns picks posted.
-    raises if none of the picks could be posted."""
+    links in `archive` are archived and listed in a note. raises if none of the picks could be
+    posted, and then nothing is archived either."""
     mention = discord.AllowedMentions(users=True, everyone=False, roles=False)
+    if not picks:
+        header = header.replace(" picks", " drop")  # only an archive note this time
     await channel.send(header, allowed_mentions=mention)
     posted = []  # (link id, message id)
     error = None
@@ -259,8 +268,16 @@ async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks:
             error = e
             continue
         posted.append((link.id, msg.id))
-    if not posted:
+    if picks and not posted:
         raise error
+    if archive:
+        try:
+            await channel.send(archive_note(archive), allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException as e:
+            if not posted:
+                raise  # nothing went out at all: let the drop be retried
+            # the picks are out; a missing note mustn't make the drop retry and repeat them
+            log.warning("guild %s: couldn't post the archive note: %s", guild_id, e)
 
     async with pool.acquire() as conn, conn.transaction():
         await conn.executemany(
@@ -271,9 +288,25 @@ async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks:
             "UPDATE links SET times_sent = times_sent + 1 WHERE id = ANY($1::bigint[])",
             [link_id for link_id, _ in posted],
         )
+        await conn.execute(
+            "UPDATE links SET status = 'archived' WHERE id = ANY($1::bigint[]) AND status = 'unread'",
+            [link.id for link in archive],
+        )
         await conn.execute("UPDATE drops SET sent_at = now() WHERE id = $1", drop_id)
-    log.info("guild %s: sent drop %s with %d link(s)", guild_id, drop_id, len(posted))
+    log.info("guild %s: sent drop %s with %d link(s), archived %d", guild_id, drop_id, len(posted), len(archive))
     return len(posted)
+
+
+def archive_note(links: list[Candidate]) -> str:
+    names = [f"**{display_title(link.title, link.url)}**" for link in links[:ARCHIVE_NOTE_LIMIT]]
+    if len(links) > ARCHIVE_NOTE_LIMIT:
+        names.append(f"{len(links) - ARCHIVE_NOTE_LIMIT} more")
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+    count = "1 link" if len(links) == 1 else f"{len(links)} links"
+    return (
+        f"🗄️ archived {count} you didn't get to after {ARCHIVE_AFTER_SENDS} sends: {listed}. "
+        "post one in #read-later again to bring it back."
+    )
 
 
 DAY_ALIASES = {name: n for n, name in DAY_NAMES.items()} | {name[:3]: n for n, name in DAY_NAMES.items()} | {
