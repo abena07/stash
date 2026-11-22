@@ -10,6 +10,7 @@ class Config:
     log_level: str
     alert_webhook_url: str | None = None
     secret_key: str | None = None
+    api_port: int | None = None  # serve the obsidian plugin api (#39) when set
 
 
 def load() -> Config:
@@ -24,4 +25,5 @@ def load() -> Config:
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         alert_webhook_url=os.environ.get("ALERT_WEBHOOK_URL") or None,
         secret_key=os.environ.get("STASH_SECRET_KEY") or None,
+        api_port=int(os.environ["PORT"]) if os.environ.get("PORT") else None,  # railway sets PORT
     )

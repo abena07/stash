@@ -89,7 +89,7 @@ def render(link: ExportLink, name_of: Callable[[int], str], show_saver: bool = F
     lines.append(f"tags: [{', '.join(_yaml(t) for t in link.tags)}]")
     if show_saver:
         lines.append(f"saved_by: {_yaml(name_of(link.saver))}")
-    lines += ["source: stash", "---", "", f"# {title}", "", link.url, ""]
+    lines += ["source: stash", f"stash_id: {link.id}", "---", "", f"# {title}", "", link.url, ""]
     if link.notes:
         lines += ["## notes", ""]
         for note in link.notes:
@@ -99,16 +99,28 @@ def render(link: ExportLink, name_of: Callable[[int], str], show_saver: bool = F
     return "\n".join(lines)
 
 
+def files(links: list[ExportLink], name_of: Callable[[int], str],
+          show_saver: bool = False) -> list[tuple[str, str, ExportLink]]:
+    """(file name, markdown, link) for each link. same-titled links get -2, -3…
+
+    the zip and the obsidian plugin both use this, so their files match exactly.
+    """
+    used: dict[str, int] = {}
+    out = []
+    for link in links:
+        base = file_name(display_title(link.title, link.url))
+        key = base.lower()
+        used[key] = used.get(key, 0) + 1
+        name = base if used[key] == 1 else f"{base} -{used[key]}"
+        out.append((f"{name}.md", render(link, name_of, show_saver), link))
+    return out
+
+
 def build_zip(links: list[ExportLink], name_of: Callable[[int], str], show_saver: bool = False,
               folder: str = "stash") -> bytes:
-    """a zip with one markdown file per link inside `folder/`. same-titled links get -2, -3…"""
+    """a zip with one markdown file per link inside `folder/`."""
     buffer = io.BytesIO()
-    used: dict[str, int] = {}
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        for link in links:
-            base = file_name(display_title(link.title, link.url))
-            key = base.lower()
-            used[key] = used.get(key, 0) + 1
-            name = base if used[key] == 1 else f"{base} -{used[key]}"
-            zf.writestr(f"{folder}/{name}.md", render(link, name_of, show_saver))
+        for name, content, _ in files(links, name_of, show_saver):
+            zf.writestr(f"{folder}/{name}", content)
     return buffer.getvalue()
