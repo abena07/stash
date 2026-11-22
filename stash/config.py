@@ -8,6 +8,7 @@ class Config:
     database_url: str
     dev_guild_id: int | None
     log_level: str
+    alert_webhook_url: str | None = None
 
 
 def load() -> Config:
@@ -20,4 +21,5 @@ def load() -> Config:
         database_url=os.environ["DATABASE_URL"],
         dev_guild_id=int(dev_guild) if dev_guild else None,
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
+        alert_webhook_url=os.environ.get("ALERT_WEBHOOK_URL") or None,
     )

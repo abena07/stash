@@ -3,11 +3,12 @@ import random
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import drops
+from .. import alerts, drops
 from .links import READ_LATER_CHANNEL
 
 log = logging.getLogger(__name__)
@@ -36,15 +37,17 @@ class Drops(commands.Cog):
         self._timezones = sorted(available_timezones())
 
     async def cog_load(self) -> None:
+        self.http = aiohttp.ClientSession()  # for the host webhook
         self.tick.start()
 
     async def cog_unload(self) -> None:
         self.tick.cancel()
+        await self.http.close()
 
     @tasks.loop(minutes=1)
     async def tick(self) -> None:
         try:
-            await drops.run_due_drops(self.bot.pool, datetime.now(timezone.utc), self._channel)
+            await drops.run_due_drops(self.bot.pool, datetime.now(timezone.utc), self._channel, self._alert)
         except Exception:
             # keep the loop alive: one bad tick shouldn't stop future drops
             log.exception("drop tick failed")
@@ -59,6 +62,24 @@ class Drops(commands.Cog):
         if guild is None:
             return None
         return discord.utils.get(guild.text_channels, name=READ_LATER_CHANNEL)
+
+    async def _alert(self, guild_id: int, user_id: int, slot: datetime, reason: str) -> None:
+        guild = self.bot.get_guild(guild_id)
+        name = guild.name if guild else str(guild_id)
+        try:
+            await alerts.tell_host(
+                self.http, self.bot.config.alert_webhook_url,
+                alerts.host_message(name, guild_id, user_id, slot, reason),
+            )
+        except Exception:
+            log.exception("guild %s: host alert failed", guild_id)
+        if guild is None:
+            return  # the bot isn't in the server any more, so there's no owner to tell
+        channel_id = await self.bot.pool.fetchval(
+            "SELECT alert_channel_id FROM guilds WHERE guild_id = $1", guild_id
+        )
+        where = await alerts.tell_owner(guild, channel_id, alerts.owner_message(name, slot, reason))
+        log.info("guild %s: failed drop alert sent (%s)", guild_id, where)
 
     @app_commands.command(description="get a couple of picks from your saved links now")
     @app_commands.guild_only()
