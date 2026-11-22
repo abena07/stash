@@ -140,7 +140,7 @@ def test_reactions_only_change_your_own_links(database):
 
 
 class ReplyWith(Channel):
-    """posts the header, then the pick as message `pick_id`."""
+    """posts the drop as message `pick_id`."""
 
     def __init__(self, pick_id):
         super().__init__()
@@ -148,7 +148,7 @@ class ReplyWith(Channel):
 
     async def send(self, content, **kwargs):
         self.sent.append(content)
-        return SimpleNamespace(id=self.pick_id if len(self.sent) > 1 else 1)
+        return SimpleNamespace(id=self.pick_id)
 
 
 def test_loved_tags_are_per_person(database):

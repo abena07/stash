@@ -132,8 +132,9 @@ def test_drop_is_sent_once_and_recorded(database):
     assert drop["scheduled_for"] == at("2026-11-18 09:00") and drop["sent_at"] is not None
     assert len(items) == 2 and all(i["discord_message_id"] for i in items)
     assert sent_counts == [1, 1, 0]
-    assert channel.sent[0] == "📬 <@10>, a few links for your wednesday"
-    assert len(channel.sent) == 3 and "4 min read" in channel.sent[1]
+    assert len(channel.sent) == 1  # the whole drop is one message
+    assert channel.sent[0].startswith("📬 <@10>, a few links for your wednesday\n\n**1. ")
+    assert "**2. " in channel.sent[0] and "4 min read" in channel.sent[0]
     assert channel.reactions == []  # the person reacts, the bot doesn't pre-fill
 
 
@@ -211,7 +212,7 @@ def test_on_demand_picks_are_recorded_and_repeatable(database):
         return first, second, drop_count, item_count
 
     assert loop.run_until_complete(go()) == (2, 1, 2, 3)
-    assert channel.sent[0] == "📬 your picks" and channel.sent[3] == "🎲 a random pick"
+    assert channel.sent[0].startswith("📬 your picks\n\n") and channel.sent[1].startswith("🎲 a random pick\n\n")
 
 
 # ---- retries and alerts (#16) ----
@@ -296,7 +297,7 @@ def test_drop_that_recovers_on_retry_sends_once_without_alert(database):
     drop = loop.run_until_complete(pool.fetchrow("SELECT * FROM drops"))
     assert sent == 1 and alert.calls == []
     assert drop["attempts"] == 1 and drop["sent_at"] is not None and drop["failed_at"] is None
-    assert len(channel.sent) == 3  # header + 2 picks, once
+    assert len(channel.sent) == 1  # one message, once
 
 
 def test_missing_channel_alerts_with_a_plain_reason(database):
@@ -324,7 +325,7 @@ def test_two_instances_ticking_together_send_once(database):
         return await asyncio.gather(*(drops.run_due_drops(pool, now, get_channel) for _ in range(3)))
 
     assert sum(loop.run_until_complete(go())) == 1
-    assert len(channel.sent) == 3
+    assert len(channel.sent) == 1
 
 
 def test_scheduler_ignores_drops_sent_from_commands(database):
@@ -420,9 +421,10 @@ def test_links_sent_3_times_are_archived_with_a_note(database):
 
     result = loop.run_until_complete(go())
     assert result == {"post 0": "archived", "post 1": "archived", "post 2": "unread", "post 3": "unread"}
-    picked = channel.sent[1:3]
-    assert all("post 0" not in m and "post 1" not in m for m in picked)  # stale links aren't picked
-    assert channel.sent[-1] == (
+    (message,) = channel.sent  # picks and archive note in one message
+    picks, note = message.split("\n\n🗄️ ")
+    assert "post 0" not in picks and "post 1" not in picks  # stale links aren't picked
+    assert "🗄️ " + note == (
         "🗄️ **2 links moved to your archive**\n\n"
         "*post 0* and *post 1* were sent 3 times without being read, so i've moved them to your archive.\n\n"
         "Still want to read it? Drop the link in this channel again and it'll be back in your queue."
@@ -445,12 +447,12 @@ def test_a_drop_with_only_stale_links_still_sends_the_note(database):
 
     result, sent_at = loop.run_until_complete(go())
     assert result == {"post 0": "archived"} and sent_at is not None
-    assert channel.sent[0] == "📬 <@10>, a quick update for your wednesday"
-    assert channel.sent[1] == (
+    assert channel.sent == [
+        "📬 <@10>, a quick update for your wednesday\n\n"
         "🗄️ **1 link moved to your archive**\n\n"
         "*post 0* was sent 3 times without being read, so i've moved it to your archive.\n\n"
         "Still want to read it? Drop the link in this channel again and it'll be back in your queue."
-    )
+    ]
 
 
 def test_nothing_is_archived_when_the_drop_fails(database):
