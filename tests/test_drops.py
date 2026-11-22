@@ -72,7 +72,8 @@ def test_pick_favours_old_short_unsent_links():
 
 
 def test_format_pick_falls_back_to_site_name():
-    assert drops.format_pick(1, link(7, minutes=5)) == "**1. example.com** · 5 min read\nhttps://example.com/7"
+    assert drops.format_pick(1, link(7, minutes=5)) == "**1. example.com**\n-# ⏱️ 5 min read\nhttps://example.com/7"
+    assert drops.format_pick(1, link(7)) == "**1. example.com**\nhttps://example.com/7"  # no details, no grey line
 
 
 # ---- against a real postgres (skipped when none is running) ----
@@ -131,7 +132,7 @@ def test_drop_is_sent_once_and_recorded(database):
     assert drop["scheduled_for"] == at("2026-11-18 09:00") and drop["sent_at"] is not None
     assert len(items) == 2 and all(i["discord_message_id"] for i in items)
     assert sent_counts == [1, 1, 0]
-    assert channel.sent[0] == "📬 <@10> your wednesday picks"
+    assert channel.sent[0] == "📬 <@10>, a few links for your wednesday"
     assert len(channel.sent) == 3 and "4 min read" in channel.sent[1]
     assert channel.reactions == []  # the person reacts, the bot doesn't pre-fill
 
@@ -422,8 +423,9 @@ def test_links_sent_3_times_are_archived_with_a_note(database):
     picked = channel.sent[1:3]
     assert all("post 0" not in m and "post 1" not in m for m in picked)  # stale links aren't picked
     assert channel.sent[-1] == (
-        "🗄️ archived 2 links you didn't get to after 3 sends: **post 0** and **post 1**. "
-        "post one in this channel again to bring it back."
+        "🗄️ **2 links moved to your archive**\n\n"
+        "*post 0* and *post 1* were sent 3 times without being read, so i've moved them to your archive.\n\n"
+        "Still want to read it? Drop the link in this channel again and it'll be back in your queue."
     )
 
 
@@ -443,8 +445,12 @@ def test_a_drop_with_only_stale_links_still_sends_the_note(database):
 
     result, sent_at = loop.run_until_complete(go())
     assert result == {"post 0": "archived"} and sent_at is not None
-    assert channel.sent[0] == "📬 <@10> your wednesday drop"
-    assert channel.sent[1].startswith("🗄️ archived 1 link you didn't get to")
+    assert channel.sent[0] == "📬 <@10>, a quick update for your wednesday"
+    assert channel.sent[1] == (
+        "🗄️ **1 link moved to your archive**\n\n"
+        "*post 0* was sent 3 times without being read, so i've moved it to your archive.\n\n"
+        "Still want to read it? Drop the link in this channel again and it'll be back in your queue."
+    )
 
 
 def test_nothing_is_archived_when_the_drop_fails(database):
@@ -467,4 +473,4 @@ def test_long_archive_notes_are_shortened():
     links = [Candidate(i, f"https://example.com/{i}", f"post {i}", None, 3, at("2026-11-01 00:00"))
              for i in range(7)]
     note = drops.archive_note(links)
-    assert "**post 4** and 2 more." in note and "post 5" not in note
+    assert "*post 4* and 2 more were sent" in note and "post 5" not in note

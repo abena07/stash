@@ -107,11 +107,27 @@ def pick(links: list[Candidate], now: datetime, k: int = PICKS_PER_DROP,
 
 
 def format_pick(n: int, link: Candidate, credit: bool = False) -> str:
+    """bold title, then a small grey line (discord's -# subtext) with reading time, tags and
+    who saved it, then the link."""
     title = display_title(link.title, link.url)
-    length = f" · {link.reading_minutes} min read" if link.reading_minutes else ""
-    tags = f" · {', '.join(link.tags)}" if link.tags else ""
-    saved_by = f" · saved by <@{link.saver}>" if credit and link.saver else ""
-    return f"**{n}. {title}**{length}{tags}{saved_by}\n{link.url}"
+    details = []
+    if link.reading_minutes:
+        details.append(f"⏱️ {link.reading_minutes} min read")
+    if link.tags:
+        details.append(", ".join(link.tags))
+    if credit and link.saver:
+        details.append(f"saved by <@{link.saver}>")
+    lines = [f"**{n}. {title}**"]
+    if details:
+        lines.append("-# " + " · ".join(details))
+    lines.append(link.url)
+    return "\n".join(lines)
+
+
+def drop_header(day: str, user_id: int, group: bool) -> str:
+    who = "@everyone" if group else f"<@{user_id}>"
+    whose = "this" if group else "your"
+    return f"📬 {who}, a few links for {whose} {day}"
 
 
 Alert = Callable[[int, int, datetime, str], Awaitable[None]]
@@ -225,8 +241,7 @@ async def _send_drop(pool, channel: Channel, drop_id: int, guild_id: int, user_i
         # everything was marked read since the slot was claimed: nothing to send, nothing failed
         await pool.execute("UPDATE drops SET sent_at = now() WHERE id = $1", drop_id)
         return
-    day = DAY_NAMES[slot.isoweekday()]
-    header = f"📬 @everyone {day}'s picks" if group else f"📬 <@{user_id}> your {day} picks"
+    header = drop_header(DAY_NAMES[slot.isoweekday()], user_id, group)
     await post_picks(pool, channel, drop_id, guild_id, picks, header, archive=stale, credit=group)
 
 
@@ -270,7 +285,7 @@ async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks:
     # "saved by @person" notifies them, unless @everyone already did: one notification each
     notify_savers = credit and not pings_everyone
     if not picks:
-        header = header.replace(" picks", " drop")  # only an archive note this time
+        header = header.replace("a few links for", "a quick update for")  # only the archive note this time
     await channel.send(header, allowed_mentions=mention)
     posted = []  # (link id, message id)
     error = None
@@ -312,16 +327,21 @@ async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks:
     return len(posted)
 
 
+RESTORE_NOTE = "Still want to read it? Drop the link in this channel again and it'll be back in your queue."
+
+
 def archive_note(links: list[Candidate]) -> str:
-    names = [f"**{display_title(link.title, link.url)}**" for link in links[:ARCHIVE_NOTE_LIMIT]]
+    one = len(links) == 1
+    names = [f"*{display_title(link.title, link.url)}*" for link in links[:ARCHIVE_NOTE_LIMIT]]
     if len(links) > ARCHIVE_NOTE_LIMIT:
         names.append(f"{len(links) - ARCHIVE_NOTE_LIMIT} more")
     listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-    count = "1 link" if len(links) == 1 else f"{len(links)} links"
-    return (
-        f"🗄️ archived {count} you didn't get to after {ARCHIVE_AFTER_SENDS} sends: {listed}. "
-        "post one in this channel again to bring it back."
+    heading = f"🗄️ **{len(links)} link{'' if one else 's'} moved to your archive**"
+    explanation = (
+        f"{listed} {'was' if one else 'were'} sent {ARCHIVE_AFTER_SENDS} times without being read, "
+        f"so i've moved {'it' if one else 'them'} to your archive."
     )
+    return f"{heading}\n\n{explanation}\n\n{RESTORE_NOTE}"
 
 
 DAY_ALIASES = {name: n for n, name in DAY_NAMES.items()} | {name[:3]: n for n, name in DAY_NAMES.items()} | {
