@@ -2,9 +2,16 @@
 
 syncs the links and notes you save with the [stash](https://stash.bennett-eghan.com) discord bot into a folder in your vault.
 
+## install (beta)
+stash isn't in obsidian's plugin store yet. until then, install it with brat:
+1. in obsidian: **settings → community plugins → browse**, search for **brat** (obsidian42 - brat), install and enable it.
+2. run **brat: add a beta plugin for testing** from the command palette (cmd/ctrl + p).
+3. paste `abena07/stash-obsidian` and confirm. brat installs stash and keeps it updated.
+4. in **settings → community plugins**, switch **stash** on.
+
 ## set up
 1. in discord, run `/connect obsidian`. stash shows you a code that only you can see.
-2. install this plugin, open its settings and paste the code.
+2. open **settings → stash** and paste the code.
 3. that's it. it syncs when obsidian opens, every 30 minutes while it's open, and whenever you run **stash: sync now**.
 
 ## what it does
