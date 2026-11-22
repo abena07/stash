@@ -2,6 +2,8 @@
 
 a discord bot that saves links from a `#read-later` channel and drops a couple of picks on a schedule.
 
+![stash system design](docs/system-design.png)
+
 ## run locally
 
 needs python 3.13 and postgres.
