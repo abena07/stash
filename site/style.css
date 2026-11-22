@@ -12,6 +12,7 @@
   --sky: #c9defb;
   --butter: #f8df86;
   --mint: #cfe8d5;
+  --rose: #f6d6cf;
   --brand: #4e3832;        /* the little bookmark mark */
   --radius: 28px;
   --column: 40rem;
@@ -77,6 +78,8 @@ main, .doc { max-width: var(--column); margin: 0 auto; }
 .mark.sky { background: var(--sky); }
 .mark.butter { background: var(--butter); }
 .mark.mint { background: var(--mint); }
+.mark.rose { background: var(--rose); }
+.section-actions { margin-top: 1.6rem; }
 
 h1, h2 {
   font-family: "Instrument Serif", Georgia, serif;
