@@ -25,7 +25,7 @@ async def apply(pool: asyncpg.Pool, guild_id: int, message_id: int, user_id: int
                 action: str, added: bool, shared: bool = False) -> int:
     """update the links behind this message. returns how many changed.
 
-    works on a drop pick and on the original post in #read-later. in a personal
+    works on a drop pick and on the original post in the read-later channel. in a personal
     server only the link's owner can change it, so a friend's reaction does
     nothing. in a shared server anyone's reaction counts for the whole group.
     """

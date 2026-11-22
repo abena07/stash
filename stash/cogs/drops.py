@@ -9,11 +9,10 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from .. import alerts, drops, modes
-from .links import READ_LATER_CHANNEL
 
 log = logging.getLogger(__name__)
 
-NOTHING_UNREAD = "nothing unread right now. post a link in #read-later to save it."
+NOTHING_UNREAD = "nothing unread right now. post a link in the read-later channel to save it."
 
 
 class InteractionChannel:
@@ -57,11 +56,10 @@ class Drops(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def _channel(self, guild_id: int) -> discord.TextChannel | None:
-        # /setup will read guilds.read_later_channel_id here first
         guild = self.bot.get_guild(guild_id)
         if guild is None:
             return None
-        return discord.utils.get(guild.text_channels, name=READ_LATER_CHANNEL)
+        return await self.bot.read_later.find(guild)
 
     async def _alert(self, guild_id: int, user_id: int, slot: datetime, reason: str) -> None:
         guild = self.bot.get_guild(guild_id)

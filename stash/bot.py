@@ -5,6 +5,7 @@ import discord
 from discord.ext import commands
 
 from . import db
+from .channels import ReadLaterChannels
 from .config import Config
 
 log = logging.getLogger(__name__)
@@ -15,14 +16,16 @@ EXTENSIONS = ["stash.cogs.core", "stash.cogs.links", "stash.cogs.drops", "stash.
 class StashBot(commands.Bot):
     def __init__(self, config: Config):
         intents = discord.Intents.default()
-        intents.message_content = True  # read urls in #read-later and notes in threads
+        intents.message_content = True  # read urls in the read-later channel and notes in threads
         intents.reactions = True
         super().__init__(command_prefix=commands.when_mentioned, intents=intents)
         self.config = config
         self.pool: asyncpg.Pool | None = None
+        self.read_later: ReadLaterChannels | None = None
 
     async def setup_hook(self) -> None:
         self.pool = await db.connect(self.config.database_url)
+        self.read_later = ReadLaterChannels(self.pool)
         for ext in EXTENSIONS:
             await self.load_extension(ext)
 
