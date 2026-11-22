@@ -21,6 +21,8 @@ def database():
                 pytest.fail(f"no test database at {TEST_DSN}: {e}")
             pytest.skip(f"no test database: {e}")
         await pool.execute("TRUNCATE guilds CASCADE")
+        # tests use fixed drop times (november 2026), so links they save count as saved before those
+        await pool.execute("ALTER TABLE links ALTER COLUMN created_at SET DEFAULT '2026-11-01'")
         return pool
 
     loop = asyncio.new_event_loop()

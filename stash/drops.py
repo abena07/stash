@@ -189,7 +189,7 @@ async def _claim_new_slots(pool, now: datetime) -> None:
         await pool.execute(
             f"""INSERT INTO drops (guild_id, user_id, scheduled_for, next_attempt_at)
                SELECT DISTINCT guild_id, {who}, $2::timestamptz, $3::timestamptz
-                 FROM links WHERE guild_id = $1 AND status = 'unread'
+                 FROM links WHERE guild_id = $1 AND status = 'unread' AND created_at <= $2
                ON CONFLICT (guild_id, user_id, scheduled_for) DO NOTHING""",
             g["guild_id"], slot, now, *([GROUP] if g["mode"] == SHARED else []),
         )
@@ -230,7 +230,10 @@ async def _attempt(pool, d, now: datetime, get_channel, alert: Alert | None, rng
 async def _send_drop(pool, channel: Channel, drop_id: int, guild_id: int, user_id: int,
                      slot: datetime, now: datetime, rng) -> None:
     group = user_id == GROUP
-    unread = await unread_links(pool, guild_id, None if group else user_id)
+    # only links saved before the drop's time: catching up after a restart shouldn't send back
+    # a link you saved a few minutes ago
+    unread = [link for link in await unread_links(pool, guild_id, None if group else user_id)
+              if link.created_at <= slot]
     # sent ARCHIVE_AFTER_SENDS times and still not read: archive instead of sending again (#12)
     stale = [link for link in unread if link.times_sent >= ARCHIVE_AFTER_SENDS]
     fresh = [link for link in unread if link.times_sent < ARCHIVE_AFTER_SENDS]
