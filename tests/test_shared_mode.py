@@ -67,9 +67,9 @@ def test_a_shared_server_gets_one_drop_for_the_group(database):
     sent, club_drop_users = loop.run_until_complete(go())
     assert sent == 2 and club_drop_users == [GROUP]  # one group drop + esi's personal one
     club = channels[CLUB].sent
-    assert club[0] == "📬 @everyone wednesday's picks"
+    assert club[0] == "📬 @everyone, a few links for this wednesday"
     assert sorted(m.split("saved by ")[1].split(">")[0] + ">" for m in club[1:]) == ["<@10>", "<@20>"]
-    assert channels[SOLO].sent[0] == "📬 <@30> your wednesday picks"
+    assert channels[SOLO].sent[0] == "📬 <@30>, a few links for your wednesday"
     header, *picks = channels[CLUB].mentions
     assert header.everyone is True  # @everyone notifies the server
     assert all(m.users is False and m.everyone is False for m in picks)  # @everyone already reached them
@@ -115,7 +115,7 @@ def test_the_pile_is_everyones_unread_links(database):
 
 def test_saved_by_is_shown_only_when_asked():
     link = drops.Candidate(1, "https://a.com/x", "X", None, 0, WEDNESDAY, (), AMA)
-    assert drops.format_pick(1, link, credit=True) == "**1. X** · saved by <@10>\nhttps://a.com/x"
+    assert drops.format_pick(1, link, credit=True) == "**1. X**\n-# saved by <@10>\nhttps://a.com/x"
     assert drops.format_pick(1, link) == "**1. X**\nhttps://a.com/x"
 
 

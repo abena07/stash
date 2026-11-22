@@ -48,7 +48,7 @@ def test_prompt_includes_existing_tags_for_reuse():
 def test_picks_show_tags():
     link = drops.Candidate(1, "https://jvns.ca/a", "Inside .git", 5, 0,
                            datetime(2026, 11, 1, tzinfo=timezone.utc), ("programming", "git"))
-    assert drops.format_pick(1, link) == "**1. Inside .git** · 5 min read · programming, git\nhttps://jvns.ca/a"
+    assert drops.format_pick(1, link) == "**1. Inside .git**\n-# ⏱️ 5 min read · programming, git\nhttps://jvns.ca/a"
 
 
 # ---- providers (#11): a fake openai-compatible api on localhost ----
