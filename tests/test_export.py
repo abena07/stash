@@ -107,10 +107,10 @@ def test_which_links_are_exported(database):
         return titles, notes
 
     titles, notes = loop.run_until_complete(go())
-    assert titles[export.READ] == ["read"]
+    assert titles[export.READ] == ["loved", "read"]  # loved links count, read or not
     assert titles[export.LOVED] == ["loved"]
     assert titles[export.ALL] == ["archived", "loved", "plain", "read"]  # never kofi's in personal mode
-    assert titles["shared"] == ["kofis", "read"]  # the whole pile in shared mode
+    assert titles["shared"] == ["kofis", "loved", "read"]  # the whole pile in shared mode
     assert notes == ["first", "second"]
 
 
@@ -140,3 +140,27 @@ class Pick:
     async def send(self, content, **kwargs):
         self.sent += 1
         return type("Msg", (), {"id": 4242 if self.sent > 1 else 4241})()
+
+
+def test_loved_on_is_written_only_for_loved_links():
+    loved = export.render(link(loved_at=READ_AT), NAMES)
+    assert "\nloved_on: 2026-11-22\n" in loved
+    assert "loved_on" not in export.render(link(loved=False, loved_at=READ_AT), NAMES)
+    assert "loved_on" not in export.render(link(loved_at=None), NAMES)  # loved before dates were kept
+
+
+def test_loving_records_when_and_undo_clears_it(database):
+    loop, pool = database
+
+    async def go():
+        ids = await seed(pool)
+        plain = next(l for l in await drops.unread_links(pool, 1, AMA) if l.title == "plain")
+        await drops.send_on_demand(pool, Pick(), 1, AMA, [plain], "📬 your picks")
+        await reactions.apply(pool, 1, 4242, AMA, "loved", True)
+        loved_at = await pool.fetchval("SELECT loved_at FROM links WHERE id = $1", ids["plain"])
+        await reactions.apply(pool, 1, 4242, AMA, "loved", False)
+        cleared = await pool.fetchval("SELECT loved_at FROM links WHERE id = $1", ids["plain"])
+        return loved_at, cleared
+
+    loved_at, cleared = loop.run_until_complete(go())
+    assert loved_at is not None and cleared is None

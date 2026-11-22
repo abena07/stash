@@ -8,6 +8,7 @@ url: "https://www.paulgraham.com/greatwork.html"
 title: "How to Do Great Work"
 saved: 2026-11-22
 read: 2026-11-23
+loved_on: 2026-11-24
 status: read
 loved: true
 tags: ["career", "productivity"]
@@ -31,6 +32,7 @@ test("reads stash's own files back", () => {
     title: "How to Do Great Work",
     read: "2026-11-23",
     loved: true,
+    lovedOn: "2026-11-24",
     tags: ["career", "productivity"],
     note: "wow paul",
   });
@@ -43,22 +45,30 @@ test("ignores other notes in the folder and links never read", () => {
   assert.equal(unread?.read, null);
 });
 
-const e = (title: string, read: string | null, loved = false, tags: string[] = [], note: string | null = null): Entry =>
-  ({ url: `https://example.com/${title}`, title, read, loved, tags, note });
+// e(title, lovedOn, …): a loved link, or with lovedOn null one you never loved
+const e = (title: string, lovedOn: string | null, loved = lovedOn !== null, tags: string[] = [],
+  note: string | null = null): Entry =>
+  ({ url: `https://example.com/${title}`, title, read: lovedOn, loved, lovedOn: loved ? lovedOn : null, tags, note });
 
-test("picks the month's reads, loved first, then most recent", () => {
+test("picks only what you loved that month, most recent first", () => {
   const entries = [
-    e("old", "2026-10-30", true), e("a", "2026-11-02"), e("b", "2026-11-20"),
-    e("loved", "2026-11-01", true), e("never read", null, true),
+    e("last month", "2026-10-30"), e("early", "2026-11-02"), e("late", "2026-11-20"),
+    e("read, not loved", "2026-11-15", false), e("loved before dates were kept", null, true),
   ];
-  assert.deepEqual(pick(entries, "2026-11", 7).map((x) => x.title), ["loved", "b", "a"]);
-  assert.deepEqual(pick(entries, "2026-11", 2).map((x) => x.title), ["loved", "b"]);
+  assert.deepEqual(pick(entries, "2026-11", 7).map((x) => x.title), ["late", "early"]);
+  assert.deepEqual(pick(entries, "2026-11", 1).map((x) => x.title), ["late"]);
+  assert.deepEqual(pick(entries, "2026-12", 7), []);
+});
+
+test("loved_on is ignored if the link is no longer loved", () => {
+  const unloved = parseStashFile(STASH_FILE.replace("loved: true", "loved: false"));
+  assert.equal(unloved?.lovedOn, null);
 });
 
 test("renders a post in the website's format, grouped by tag", () => {
   const post = render([
     e("how-to-do-great-work", "2026-11-23", true, ["career"], "wow paul"),
-    e("inside-git", "2026-11-21", false, ["programming"]),
+    e("inside-git", "2026-11-21", true, ["programming"]),
     e("untagged", "2026-11-05"),
   ], "2026-11", "november 30, 2026", true);
   assert.equal(post, `export const meta = {
@@ -90,7 +100,7 @@ test("spaces and brackets in urls are encoded so the markdown link holds", () =>
 });
 
 test("no headings when nothing is tagged, and notes can be left out", () => {
-  const post = render([e("a", "2026-11-02", false, [], "hidden")], "2026-11", "november 30, 2026", false);
+  const post = render([e("a", "2026-11-02", true, [], "hidden")], "2026-11", "november 30, 2026", false);
   assert.ok(post.endsWith("my favourite reads from november.\n\n- [a](https://example.com/a)\n"));
 });
 

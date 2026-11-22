@@ -104,7 +104,7 @@ export default class StashPlugin extends Plugin {
       .filter((e): e is roundup.Entry => e !== null);
     const picked = roundup.pick(entries, month, this.settings.roundupCount);
     if (picked.length === 0) {
-      new Notice(`stash: nothing read in ${roundup.monthName(month)} yet. links need ✅ in discord, then a sync.`, 8000);
+      new Notice(`stash: nothing loved in ${roundup.monthName(month)} yet. react 👍 on links in discord, then sync.`, 8000);
       return;
     }
 
@@ -198,7 +198,7 @@ class StashSettings extends PluginSettingTab {
     new Setting(containerEl)
       .setName("Which links")
       .addDropdown((d) => d
-        .addOption("read", "read (marked ✅)")
+        .addOption("read", "read or loved (✅ or 👍)")
         .addOption("loved", "loved (marked 👍)")
         .addOption("all", "all saved links")
         .setValue(s.which)
@@ -232,8 +232,8 @@ class StashSettings extends PluginSettingTab {
 
     new Setting(containerEl).setName("Monthly roundup").setHeading();
     containerEl.createEl("p", {
-      text: "run \"stash: make monthly roundup\" from the command palette to turn a month's reads into a post "
-        + "for your site: loved links first, grouped by tag.",
+      text: "run \"stash: make monthly roundup\" from the command palette to turn the links you loved (👍) "
+        + "that month into a post for your site, grouped by tag.",
     });
 
     new Setting(containerEl)

@@ -14,6 +14,7 @@ export interface Entry {
   title: string;
   read: string | null; // yyyy-mm-dd
   loved: boolean;
+  lovedOn: string | null; // yyyy-mm-dd, when you 👍'd it
   tags: string[];
   note: string | null; // the first note, if any
 }
@@ -48,16 +49,18 @@ export function parseStashFile(text: string): Entry | null {
     title: str(fields.title) || str(fields.url),
     read: /^\d{4}-\d{2}-\d{2}$/.test(fields.read ?? "") ? fields.read : null,
     loved: fields.loved === "true",
+    lovedOn: fields.loved === "true" && /^\d{4}-\d{2}-\d{2}$/.test(fields.loved_on ?? "") ? fields.loved_on : null,
     tags: Array.isArray(tags) ? tags.map(String) : [],
     note: note || null,
   };
 }
 
-// links read in `month` ("yyyy-mm"), loved first, then most recently read, at most `count`
+// links you loved in `month` ("yyyy-mm"), most recently loved first, at most `count`.
+// a month with fewer loved links just makes a shorter post: nothing unloved is added to fill it.
 export function pick(entries: Entry[], month: string, count: number): Entry[] {
   return entries
-    .filter((e) => e.read?.startsWith(month))
-    .sort((a, b) => Number(b.loved) - Number(a.loved) || (b.read ?? "").localeCompare(a.read ?? ""))
+    .filter((e) => e.loved && e.lovedOn?.startsWith(month))
+    .sort((a, b) => (b.lovedOn ?? "").localeCompare(a.lovedOn ?? ""))
     .slice(0, Math.max(1, count));
 }
 
