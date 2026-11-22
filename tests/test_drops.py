@@ -1,8 +1,10 @@
+import asyncio
 import itertools
 import random
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+import discord
 import pytest
 
 from stash import drops
@@ -209,3 +211,134 @@ def test_on_demand_picks_are_recorded_and_repeatable(database):
 
     assert loop.run_until_complete(go()) == (2, 1, 2, 3)
     assert channel.sent[0] == "📬 your picks" and channel.sent[3] == "🎲 a random pick"
+
+
+# ---- retries and alerts (#16) ----
+
+def http_error(cls, status):
+    response = type("Response", (), {"status": status, "reason": "nope"})()
+    return cls(response, "nope")
+
+
+class FlakyChannel(FakeChannel):
+    """fails the first `failures` sends, then works."""
+
+    def __init__(self, failures, error=None):
+        super().__init__()
+        self.failures = failures
+        self.error = error or http_error(discord.Forbidden, 403)
+
+    async def send(self, content, **kwargs):
+        if self.failures:
+            self.failures -= 1
+            raise self.error
+        return await super().send(content, **kwargs)
+
+
+class Alerts:
+    def __init__(self):
+        self.calls = []
+
+    async def __call__(self, guild_id, user_id, slot, reason):
+        self.calls.append((guild_id, user_id, slot, reason))
+
+
+@pytest.mark.parametrize(
+    "error, reason",
+    [
+        (drops.DropFailed("i couldn't find a #read-later channel"), "i couldn't find a #read-later channel"),
+        (http_error(discord.Forbidden, 403), "i don't have permission to post in #read-later"),
+        (http_error(discord.NotFound, 404), "the #read-later channel seems to have been deleted"),
+        (http_error(discord.HTTPException, 500), "discord rejected the message (error 500)"),
+        (RuntimeError("boom"), "something went wrong on my side"),
+    ],
+)
+def test_failure_reason(error, reason):
+    assert drops.failure_reason(error) == reason
+
+
+def run_ticks(loop, pool, get_channel, alert, start, minutes):
+    """one tick per minute, like the real scheduler."""
+    async def go():
+        sent = 0
+        for m in range(minutes):
+            sent += await drops.run_due_drops(pool, start + timedelta(minutes=m), get_channel, alert)
+        return sent
+    return loop.run_until_complete(go())
+
+
+def test_failed_drop_retries_3_times_then_alerts_once(database):
+    loop, pool = database
+    channel, alert = FlakyChannel(failures=1000), Alerts()
+    loop.run_until_complete(seed(pool))
+
+    async def get_channel(guild_id):
+        return channel
+
+    sent = run_ticks(loop, pool, get_channel, alert, at("2026-11-18 09:00"), minutes=60)
+    drop = loop.run_until_complete(pool.fetchrow("SELECT * FROM drops"))
+    assert sent == 0
+    assert drop["attempts"] == 4 and drop["failed_at"] == at("2026-11-18 09:15")  # 09:00 + 3 × 5 min
+    assert "Forbidden" in drop["last_error"]
+    assert alert.calls == [(1, 10, at("2026-11-18 09:00"), "i don't have permission to post in #read-later")]
+
+
+def test_drop_that_recovers_on_retry_sends_once_without_alert(database):
+    loop, pool = database
+    channel, alert = FlakyChannel(failures=1), Alerts()
+    loop.run_until_complete(seed(pool))
+
+    async def get_channel(guild_id):
+        return channel
+
+    sent = run_ticks(loop, pool, get_channel, alert, at("2026-11-18 09:00"), minutes=30)
+    drop = loop.run_until_complete(pool.fetchrow("SELECT * FROM drops"))
+    assert sent == 1 and alert.calls == []
+    assert drop["attempts"] == 1 and drop["sent_at"] is not None and drop["failed_at"] is None
+    assert len(channel.sent) == 3  # header + 2 picks, once
+
+
+def test_missing_channel_alerts_with_a_plain_reason(database):
+    loop, pool = database
+    alert = Alerts()
+    loop.run_until_complete(seed(pool))
+
+    async def no_channel(guild_id):
+        return None
+
+    run_ticks(loop, pool, no_channel, alert, at("2026-11-18 09:00"), minutes=20)
+    assert [c[3] for c in alert.calls] == ["i couldn't find a #read-later channel"]
+
+
+def test_two_instances_ticking_together_send_once(database):
+    loop, pool = database
+    channel = FakeChannel()
+    loop.run_until_complete(seed(pool))
+
+    async def get_channel(guild_id):
+        return channel
+
+    async def go():
+        now = at("2026-11-18 09:01")
+        return await asyncio.gather(*(drops.run_due_drops(pool, now, get_channel) for _ in range(3)))
+
+    assert sum(loop.run_until_complete(go())) == 1
+    assert len(channel.sent) == 3
+
+
+def test_scheduler_ignores_drops_sent_from_commands(database):
+    loop, pool = database
+    channel = FakeChannel()
+
+    async def go():
+        await seed(pool)
+        await pool.execute(
+            "INSERT INTO drops (guild_id, user_id, scheduled_for) VALUES (1, 10, $1)", at("2026-11-20 12:00")
+        )
+
+        async def get_channel(guild_id):
+            return channel
+
+        return await drops.run_due_drops(pool, at("2026-11-20 12:01"), get_channel)  # friday, no slot
+
+    assert loop.run_until_complete(go()) == 0 and channel.sent == []
