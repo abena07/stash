@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>privacy · stash</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 22'%3E%3Cpath d='M2 1h14v20l-7-5-7 5z' fill='%23111111'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Merriweather:opsz,wght@18..144,300;18..144,400;18..144,600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="paper">
+  <header class="bar">
+    <a class="logo" href="index.html">
+      <svg viewBox="0 0 18 22" aria-hidden="true"><path d="M2 1h14v20l-7-5-7 5z" fill="#111111"/></svg>
+      stash
+    </a>
+    <nav><a href="index.html">home</a></nav>
+  </header>
+
+  <article class="doc">
+    <h1><span class="mark">privacy</span></h1>
+    <p class="updated">last updated 22 november 2026</p>
+
+    <p>stash is a discord bot that saves links posted in a <strong>#read-later</strong> channel and sends some of them back on a schedule. this page explains what it stores, why, and who else sees it. if anything here is unclear, email <a href="mailto:hi@bennett-eghan.com">hi@bennett-eghan.com</a>.</p>
+
+    <h3>what stash reads</h3>
+    <ul>
+      <li>messages in <strong>#read-later</strong>, to find links in them. other text in those messages is not stored.</li>
+      <li>messages in the notes threads stash opens for saved links. those are stored as notes.</li>
+      <li>reactions (✅ and 👍) on its own messages and on posts in #read-later.</li>
+    </ul>
+    <p>stash does not read other channels or direct messages.</p>
+
+    <h3>what stash stores</h3>
+    <ul>
+      <li><strong>discord ids</strong>: the server, the person who saved each link, and the message and thread ids needed to connect reactions and notes back to a link.</li>
+      <li><strong>saved links</strong>: the url, plus the page's title, description and estimated reading time, which stash fetches from the page itself.</li>
+      <li><strong>notes</strong>: the text of messages written in a link's notes thread, with who wrote them.</li>
+      <li><strong>reading state</strong>: whether a link is unread, read, loved or archived, how many times it has been sent, and which links went out in which drop.</li>
+      <li><strong>tags</strong>: topic tags, only if the server has added an ai key with /setkey.</li>
+      <li><strong>server settings</strong>: drop days, time and timezone, personal or shared mode, an optional alert channel, and the ai provider and model if one is set.</li>
+      <li><strong>ai keys</strong>: if a server adds one with /setkey, it is stored encrypted and used only to tag that server's links.</li>
+    </ul>
+
+    <h3>who else sees it</h3>
+    <ul>
+      <li><strong>discord</strong>, which carries every message, reaction and command, including keys typed into the /setkey form.</li>
+      <li><strong>railway</strong>, which hosts the bot and its database in the united states.</li>
+      <li><strong>the websites you save.</strong> when fetching a page's title, stash's server visits that page like a browser would. the site sees the server's address, not yours.</li>
+      <li><strong>the ai provider a server chooses</strong> (claude, openai, gemini, deepseek or openrouter), only if the server added a key. for each new link, stash sends the url, title, description and the existing tags, and nothing else. that provider's own privacy policy applies.</li>
+      <li><strong>the host</strong> receives an alert when a scheduled drop fails, with the server's name and id, a user id and the reason.</li>
+    </ul>
+    <p>stash does not sell data, show ads or use analytics or trackers. this website loads its font from google fonts.</p>
+
+    <h3>who can see your links</h3>
+    <p>in a <strong>personal</strong> server, your saved links, picks and reactions are yours; other people in the server don't get them in their drops. in a <strong>shared</strong> server, everyone's links go into one pile that the whole server sees, with the name of who saved each one. links you post in #read-later are visible in discord to anyone who can see that channel either way.</p>
+
+    <h3>keeping and deleting data</h3>
+    <ul>
+      <li>deleting a message in a notes thread deletes that note. deleting the thread deletes its notes.</li>
+      <li>/setkey with <em>remove</em> deletes a server's ai key straight away.</li>
+      <li>everything else is kept until you ask for it to be deleted. removing stash from a server does not delete that server's data on its own. to delete your data or a whole server's, email <a href="mailto:hi@bennett-eghan.com">hi@bennett-eghan.com</a> with the server's name.</li>
+    </ul>
+
+    <h3>changes</h3>
+    <p>if this policy changes, the date at the top changes too. big changes will also be noted in the project's github repository.</p>
+  </article>
+
+  <footer>
+    <span>stash · a small, independent discord bot</span>
+    <nav>
+      <a href="privacy.html">privacy</a>
+      <a href="terms.html">terms</a>
+      <a href="mailto:hi@bennett-eghan.com">hi@bennett-eghan.com</a>
+    </nav>
+  </footer>
+</div>
+</body>
+</html>
