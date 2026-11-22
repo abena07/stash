@@ -298,7 +298,9 @@ async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks:
     parts = [header] + [format_pick(n, link, credit) for n, link in enumerate(picks, 1)]
     if archive:
         parts.append(archive_note(archive))
-    view = buttons.build_view([buttons.PickState(link.id) for link in picks]) if picks else None
+    view = buttons.build_view(
+        [buttons.PickState(link.id, display_title(link.title, link.url)) for link in picks]
+    ) if picks else None
     kwargs = {"allowed_mentions": mention, "suppress_embeds": True}
     if view is not None:
         kwargs["view"] = view

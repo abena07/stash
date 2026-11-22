@@ -22,20 +22,46 @@ def ids_and_labels(view):
     return [(item.item.custom_id, item.item.label, item.item.style.name, item.item.row) for item in view.children]
 
 
-def test_two_buttons_per_pick_numbered_and_off():
-    view = buttons.build_view([buttons.PickState(11), buttons.PickState(12, read=True, loved=True)])
+def test_one_row_per_pick_named_after_it():
+    view = buttons.build_view([buttons.PickState(11, "How to Do Great Work"),
+                               buttons.PickState(12, "How to Work Hard", read=True, loved=True)])
     assert ids_and_labels(view) == [
-        ("stash:pick:11:read", "✅ 1", "secondary", 0),
-        ("stash:pick:11:loved", "👍🏿 1", "secondary", 0),
-        ("stash:pick:12:read", "✅ read 2", "success", 0),
-        ("stash:pick:12:loved", "👍🏿 loved 2", "success", 0),
+        ("stash:pick:11:read", "✅ How to Do Great Work", "secondary", 0),
+        ("stash:pick:11:loved", "👍🏿 love", "secondary", 0),
+        ("stash:pick:12:read", "✅ read · How to Work Hard", "success", 1),
+        ("stash:pick:12:loved", "👍🏿 loved", "success", 1),
     ]
     assert view.timeout is None  # buttons don't expire
 
 
-def test_buttons_wrap_to_a_new_row_every_two_picks():
-    view = buttons.build_view([buttons.PickState(i) for i in range(5)])
-    assert [item.item.row for item in view.children] == [0, 0, 0, 0, 1, 1, 1, 1, 2, 2]
+def test_every_pick_in_a_drop_gets_buttons():
+    assert drops.PICKS_PER_DROP <= buttons.MAX_ROWS
+
+
+def test_long_titles_are_shortened_on_buttons():
+    view = buttons.build_view([buttons.PickState(1, "x" * 200)])
+    assert len(view.children[0].item.label) <= 2 + buttons.TITLE_IN_BUTTON
+
+
+def test_at_most_five_picks_get_buttons():
+    view = buttons.build_view([buttons.PickState(i, f"p{i}") for i in range(7)])
+    assert [item.item.row for item in view.children] == [0, 0, 1, 1, 2, 2, 3, 3, 4, 4]
+
+
+MESSAGE = (
+    "📬 your picks\n\n"
+    "**1. How to Do Great Work**\n-# ⏱️ 52 min read\nhttps://a.com/1\n\n"
+    "**2. No details**\nhttps://a.com/2"
+)
+
+
+def test_status_shows_on_each_pick_and_can_be_undone():
+    both = buttons.with_status(MESSAGE, [buttons.PickState(1, read=True, loved=True), buttons.PickState(2, loved=True)])
+    assert "-# ⏱️ 52 min read · ✅ read · 👍🏿 loved\nhttps://a.com/1" in both
+    assert "**2. No details**\n-# 👍🏿 loved\nhttps://a.com/2" in both  # a grey line appears when needed
+    undone = buttons.with_status(both, [buttons.PickState(1), buttons.PickState(2)])
+    assert "-# ⏱️ 52 min read\nhttps://a.com/1" in undone and "· ✅ read" not in undone
+    assert "-# 👍🏿 loved" not in undone
 
 
 async def seed(pool, links=2):
@@ -77,10 +103,10 @@ def test_pressing_a_button_redraws_with_the_new_state(database):
         message_id = await pool.fetchval("SELECT discord_message_id FROM drop_items LIMIT 1")
         first = await pool.fetchval("SELECT link_id FROM drop_items ORDER BY id LIMIT 1")
         await reactions.set_state(pool, [first], "loved", True)  # what the 👍🏿 1 button does
-        return await buttons.view_for_message(pool, message_id)
+        return buttons.build_view(await buttons.states_for_message(pool, message_id))
 
     labels = [item.item.label for item in loop.run_until_complete(go()).children]
-    assert labels == ["✅ 1", "👍🏿 loved 1", "✅ 2", "👍🏿 2"]
+    assert labels == ["✅ post 0", "👍🏿 loved", "✅ post 1", "👍🏿 love"]
 
 
 def test_a_reaction_on_a_multi_pick_message_changes_nothing(database):
