@@ -384,3 +384,87 @@ def test_loved_tags_come_from_loved_links_only(database):
         return await drops.loved_tags(pool, 1, 10)
 
     assert loop.run_until_complete(go()) == {"design", "ui"}
+
+
+
+# ---- archiving after 3 unread sends (#12) ----
+
+async def seed_sent(pool, sends):
+    """one unread link per entry in `sends`, with that many previous sends."""
+    await pool.execute("INSERT INTO guilds (guild_id) VALUES (1) ON CONFLICT DO NOTHING")
+    for i, n in enumerate(sends):
+        await pool.execute(
+            """INSERT INTO links (guild_id, user_id, url, url_normalized, title, times_sent)
+               VALUES (1, 10, $1, $1, $2, $3)""",
+            f"https://example.com/{i}", f"post {i}", n,
+        )
+
+
+async def statuses(pool):
+    return {r["title"]: r["status"] for r in await pool.fetch("SELECT title, status FROM links")}
+
+
+def test_links_sent_3_times_are_archived_with_a_note(database):
+    loop, pool = database
+    channel = FakeChannel()
+
+    async def go():
+        await seed_sent(pool, [3, 5, 0, 2])
+
+        async def get_channel(guild_id):
+            return channel
+
+        await drops.run_due_drops(pool, at("2026-11-18 09:01"), get_channel)
+        return await statuses(pool)
+
+    result = loop.run_until_complete(go())
+    assert result == {"post 0": "archived", "post 1": "archived", "post 2": "unread", "post 3": "unread"}
+    picked = channel.sent[1:3]
+    assert all("post 0" not in m and "post 1" not in m for m in picked)  # stale links aren't picked
+    assert channel.sent[-1] == (
+        "🗄️ archived 2 links you didn't get to after 3 sends: **post 0** and **post 1**. "
+        "post one in #read-later again to bring it back."
+    )
+
+
+def test_a_drop_with_only_stale_links_still_sends_the_note(database):
+    loop, pool = database
+    channel = FakeChannel()
+
+    async def go():
+        await seed_sent(pool, [3])
+
+        async def get_channel(guild_id):
+            return channel
+
+        await drops.run_due_drops(pool, at("2026-11-18 09:01"), get_channel)
+        sent_at = await pool.fetchval("SELECT sent_at FROM drops")
+        return await statuses(pool), sent_at
+
+    result, sent_at = loop.run_until_complete(go())
+    assert result == {"post 0": "archived"} and sent_at is not None
+    assert channel.sent[0] == "📬 <@10> your wednesday drop"
+    assert channel.sent[1].startswith("🗄️ archived 1 link you didn't get to")
+
+
+def test_nothing_is_archived_when_the_drop_fails(database):
+    loop, pool = database
+    channel = FlakyChannel(failures=1000)
+
+    async def go():
+        await seed_sent(pool, [3, 0])
+
+        async def get_channel(guild_id):
+            return channel
+
+        await drops.run_due_drops(pool, at("2026-11-18 09:01"), get_channel)
+        return await statuses(pool)
+
+    assert loop.run_until_complete(go()) == {"post 0": "unread", "post 1": "unread"}
+
+
+def test_long_archive_notes_are_shortened():
+    links = [Candidate(i, f"https://example.com/{i}", f"post {i}", None, 3, at("2026-11-01 00:00"))
+             for i in range(7)]
+    note = drops.archive_note(links)
+    assert "**post 4** and 2 more." in note and "post 5" not in note
