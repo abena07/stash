@@ -107,7 +107,7 @@ class ReaddButton(
         if self.choice == "yes":
             # reset times_sent so the archive rule (#12) doesn't archive it straight away
             await pool.execute(
-                "UPDATE links SET status = 'unread', times_sent = 0 WHERE id = $1 AND guild_id = $2",
+                "UPDATE links SET status = 'unread', times_sent = 0, read_at = NULL WHERE id = $1 AND guild_id = $2",
                 self.link_id, interaction.guild_id,
             )
             content = f"re-added {SAVED}"

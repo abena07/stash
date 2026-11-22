@@ -46,7 +46,10 @@ async def apply(pool: asyncpg.Pool, guild_id: int, message_id: int, user_id: int
         # undoing only reverts read → unread, never touches archived links
         old, new = ("unread", "read") if added else ("read", "unread")
         result = await pool.execute(
-            "UPDATE links SET status = $2 WHERE id = ANY($1::bigint[]) AND status = $3",
+            # read_at records when it was read (for the obsidian export); undoing clears it
+            """UPDATE links SET status = $2::link_status,
+                                 read_at = CASE WHEN $2::link_status = 'read' THEN now() END
+               WHERE id = ANY($1::bigint[]) AND status = $3::link_status""",
             ids, new, old,
         )
     else:
