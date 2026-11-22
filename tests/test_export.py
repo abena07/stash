@@ -103,7 +103,8 @@ def test_which_links_are_exported(database):
         for which in (export.READ, export.LOVED, export.ALL):
             titles[which] = sorted(l.title for l in await export.fetch(pool, 1, AMA, which))
         titles["shared"] = sorted(l.title for l in await export.fetch(pool, 1, None, export.READ))
-        notes = [n.content for n in (await export.fetch(pool, 1, AMA, export.READ))[0].notes]
+        read = next(l for l in await export.fetch(pool, 1, AMA, export.READ) if l.title == "read")
+        notes = [n.content for n in read.notes]
         return titles, notes
 
     titles, notes = loop.run_until_complete(go())
