@@ -3,7 +3,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from .. import modes, reactions
+from .. import buttons, modes, reactions
 
 log = logging.getLogger(__name__)
 
@@ -39,4 +39,5 @@ class Reactions(commands.Cog):
 
 
 async def setup(bot) -> None:
+    bot.add_dynamic_items(buttons.PickButton)  # drop buttons keep working after a restart
     await bot.add_cog(Reactions(bot))

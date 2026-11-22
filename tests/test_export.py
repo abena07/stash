@@ -133,14 +133,14 @@ def test_reading_records_when_and_undo_clears_it(database):
 
 
 class Pick:
-    """posts the header, then the pick as message 4242."""
+    """posts the drop as message 4242."""
 
     def __init__(self):
         self.sent = 0
 
     async def send(self, content, **kwargs):
         self.sent += 1
-        return type("Msg", (), {"id": 4242 if self.sent > 1 else 4241})()
+        return type("Msg", (), {"id": 4242})()
 
 
 def test_loved_on_is_written_only_for_loved_links():

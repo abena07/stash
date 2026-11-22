@@ -1,5 +1,6 @@
 """shared mode: one reading pile and one drop for the whole server."""
 
+import re
 import itertools
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -66,13 +67,12 @@ def test_a_shared_server_gets_one_drop_for_the_group(database):
 
     sent, club_drop_users = loop.run_until_complete(go())
     assert sent == 2 and club_drop_users == [GROUP]  # one group drop + esi's personal one
-    club = channels[CLUB].sent
-    assert club[0] == "📬 @everyone, a few links for this wednesday"
-    assert sorted(m.split("saved by ")[1].split(">")[0] + ">" for m in club[1:]) == ["<@10>", "<@20>"]
-    assert channels[SOLO].sent[0] == "📬 <@30>, a few links for your wednesday"
-    header, *picks = channels[CLUB].mentions
-    assert header.everyone is True  # @everyone notifies the server
-    assert all(m.users is False and m.everyone is False for m in picks)  # @everyone already reached them
+    (club,) = channels[CLUB].sent  # one message for the whole group
+    assert club.startswith("📬 @everyone, a few links for this wednesday\n\n")
+    assert sorted(re.findall(r"saved by <@(\d+)>", club)) == ["10", "20"]
+    assert channels[SOLO].sent[0].startswith("📬 <@30>, a few links for your wednesday\n\n")
+    (mention,) = channels[CLUB].mentions
+    assert mention.everyone is True and mention.users is False  # @everyone reaches savers too: one notification
 
 
 def test_anyones_reaction_counts_for_the_group(database):
@@ -120,7 +120,7 @@ def test_saved_by_is_shown_only_when_asked():
 
 
 class Pick(Channel):
-    """header first, then the pick as message `pick_id`."""
+    """posts the drop as message `pick_id`."""
 
     def __init__(self, pick_id):
         super().__init__()
@@ -128,7 +128,7 @@ class Pick(Channel):
 
     async def send(self, content, **kwargs):
         self.sent.append(content)
-        return SimpleNamespace(id=self.pick_id if len(self.sent) > 1 else next(_ids))
+        return SimpleNamespace(id=self.pick_id)
 
 
 def test_on_demand_picks_notify_the_saver(database):
@@ -141,6 +141,6 @@ def test_on_demand_picks_notify_the_saver(database):
         await drops.send_on_demand(pool, channel, CLUB, KOFI, pile[:1], "📬 picks from the pile", credit=True)
 
     loop.run_until_complete(go())
-    header, pick = channel.mentions
-    assert header.everyone is False  # /picks doesn't ping the server
-    assert pick.users is True  # so "saved by @person" is their one notification
+    (mention,) = channel.mentions
+    assert mention.everyone is False  # /picks doesn't ping the server
+    assert mention.users is True  # so "saved by @person" is their one notification

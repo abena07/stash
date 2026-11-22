@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import asyncpg
 import discord
 
+from . import buttons
 from .metadata import display_title
 from .modes import GROUP, SHARED
 
@@ -284,38 +285,27 @@ async def unread_links(pool, guild_id: int, user_id: int | None) -> list[Candida
 
 async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks: list[Candidate],
                      header: str, archive: list[Candidate] = (), credit: bool = False) -> int:
-    """post a header and one message per pick, then record what was sent. returns picks posted.
-    links in `archive` are archived and listed in a note. raises if none of the picks could be
-    posted, and then nothing is archived either."""
-    # users: the personal drop's <@person>. everyone: lets a group drop's @everyone notify the server
+    """post the whole drop as one message: header, numbered picks with ✅/👍🏿 buttons, and the
+    archive note if links were archived. then record what was sent. returns picks posted.
+    if the message can't be posted this raises, and nothing is recorded or archived."""
+    # @everyone notifies a shared server's group drop. otherwise <@person> mentions notify:
+    # the personal drop's owner, or "saved by" in shared picks (one notification each)
     pings_everyone = header.startswith("📬 @everyone")
-    mention = discord.AllowedMentions(users=True, everyone=pings_everyone, roles=False)
-    # "saved by @person" notifies them, unless @everyone already did: one notification each
-    notify_savers = credit and not pings_everyone
+    mention = discord.AllowedMentions(users=not pings_everyone, everyone=pings_everyone, roles=False)
     if not picks:
         header = header.replace("a few links for", "a quick update for")  # only the archive note this time
-    await channel.send(header, allowed_mentions=mention)
-    posted = []  # (link id, message id)
-    error = None
-    for n, link in enumerate(picks, 1):
-        try:
-            msg = await channel.send(format_pick(n, link, credit),
-                                     allowed_mentions=discord.AllowedMentions(users=notify_savers, everyone=False, roles=False))
-        except discord.HTTPException as e:
-            log.warning("guild %s: couldn't post link %s: %s", guild_id, link.id, e)
-            error = e
-            continue
-        posted.append((link.id, msg.id))
-    if picks and not posted:
-        raise error
+
+    parts = [header] + [format_pick(n, link, credit) for n, link in enumerate(picks, 1)]
     if archive:
-        try:
-            await channel.send(archive_note(archive), allowed_mentions=discord.AllowedMentions.none())
-        except discord.HTTPException as e:
-            if not posted:
-                raise  # nothing went out at all: let the drop be retried
-            # the picks are out; a missing note mustn't make the drop retry and repeat them
-            log.warning("guild %s: couldn't post the archive note: %s", guild_id, e)
+        parts.append(archive_note(archive))
+    view = buttons.build_view(
+        [buttons.PickState(link.id, display_title(link.title, link.url)) for link in picks]
+    ) if picks else None
+    kwargs = {"allowed_mentions": mention, "suppress_embeds": True}
+    if view is not None:
+        kwargs["view"] = view
+    msg = await channel.send("\n\n".join(parts), **kwargs)
+    posted = [(link.id, msg.id) for link in picks]
 
     async with pool.acquire() as conn, conn.transaction():
         await conn.executemany(
