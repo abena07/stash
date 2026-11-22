@@ -38,14 +38,16 @@ class ExportLink:
     created_at: datetime
     read_at: datetime | None
     saver: int
+    loved_at: datetime | None = None
     notes: list[Note] = field(default_factory=list)
 
 
 async def fetch(pool: asyncpg.Pool, guild_id: int, user_id: int | None, which: str) -> list[ExportLink]:
     """one person's links (user_id), or the whole server's pile (None), with their notes."""
-    where = {READ: "status = 'read'", LOVED: "loved", ALL: "true"}[which]
+    # "read" includes loved links: anything you loved is worth keeping, read or not
+    where = {READ: "status = 'read' OR loved", LOVED: "loved", ALL: "true"}[which]
     rows = await pool.fetch(
-        f"""SELECT id, url, title, status::text AS status, loved, tags, created_at, read_at, user_id AS saver
+        f"""SELECT id, url, title, status::text AS status, loved, tags, created_at, read_at, loved_at, user_id AS saver
             FROM links
             WHERE guild_id = $1 AND ($2::bigint IS NULL OR user_id = $2) AND ({where})
             ORDER BY created_at""",
@@ -84,6 +86,8 @@ def render(link: ExportLink, name_of: Callable[[int], str], show_saver: bool = F
     ]
     if link.read_at:
         lines.append(f"read: {link.read_at:%Y-%m-%d}")
+    if link.loved and link.loved_at:
+        lines.append(f"loved_on: {link.loved_at:%Y-%m-%d}")
     lines.append(f"status: {link.status}")
     lines.append(f"loved: {'true' if link.loved else 'false'}")
     lines.append(f"tags: [{', '.join(_yaml(t) for t in link.tags)}]")

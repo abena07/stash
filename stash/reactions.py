@@ -54,7 +54,9 @@ async def apply(pool: asyncpg.Pool, guild_id: int, message_id: int, user_id: int
         )
     else:
         result = await pool.execute(
-            "UPDATE links SET loved = $2 WHERE id = ANY($1::bigint[]) AND loved <> $2",
+            # loved_at records when (for the monthly roundup); un-loving clears it
+            """UPDATE links SET loved = $2, loved_at = CASE WHEN $2 THEN now() END
+               WHERE id = ANY($1::bigint[]) AND loved <> $2""",
             ids, added,
         )
     return int(result.split()[-1])

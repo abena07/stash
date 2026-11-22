@@ -19,7 +19,7 @@ class Export(commands.Cog):
     @app_commands.command(description="download your links and notes as markdown files for obsidian")
     @app_commands.describe(which="which links to include (default: the ones you've read)")
     @app_commands.choices(which=[
-        app_commands.Choice(name="read (marked ✅)", value=md.READ),
+        app_commands.Choice(name="read or loved (✅ or 👍)", value=md.READ),
         app_commands.Choice(name="loved (marked 👍)", value=md.LOVED),
         app_commands.Choice(name="all saved links", value=md.ALL),
     ])
@@ -30,7 +30,7 @@ class Export(commands.Cog):
         shared = await modes.is_shared(self.bot.pool, interaction.guild_id)
         links = await md.fetch(self.bot.pool, interaction.guild_id, None if shared else interaction.user.id, kind)
         if not links:
-            empty = {md.READ: "nothing marked read yet. react ✅ on a link once you've read it.",
+            empty = {md.READ: "nothing read or loved yet. react ✅ on a link once you've read it, or 👍 if you loved it.",
                      md.LOVED: "nothing marked loved yet. react 👍 on a link you loved.",
                      md.ALL: "no saved links yet."}[kind]
             await interaction.followup.send(empty, ephemeral=True)
