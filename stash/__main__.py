@@ -22,9 +22,15 @@ def setup_logging(level: str) -> None:
     logging.basicConfig(level=level, handlers=[out, err])
 
 
+def not_voice_warning(record: logging.LogRecord) -> bool:
+    """stash never joins voice channels, so discord.py's "voice will NOT be supported" warnings are noise."""
+    return "voice will NOT be supported" not in record.getMessage()
+
+
 def main() -> None:
     cfg = config.load()
     setup_logging(cfg.log_level)
+    logging.getLogger("discord.client").addFilter(not_voice_warning)
     StashBot(cfg).run(cfg.discord_token, log_handler=None)
 
 

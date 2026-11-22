@@ -48,7 +48,7 @@ def test_prompt_includes_existing_tags_for_reuse():
 def test_picks_show_tags():
     link = drops.Candidate(1, "https://jvns.ca/a", "Inside .git", 5, 0,
                            datetime(2026, 11, 1, tzinfo=timezone.utc), ("programming", "git"))
-    assert drops.format_pick(1, link) == "**1. Inside .git**\n-# ⏱️ 5 min read · programming, git\nhttps://jvns.ca/a"
+    assert drops.format_pick(1, link) == "**1. Inside .git**\n-# ⏱️ 5 min read · #programming #git\nhttps://jvns.ca/a"
 
 
 # ---- providers (#11): a fake openai-compatible api on localhost ----
@@ -173,3 +173,21 @@ def test_claude_uses_the_sdk_with_structured_output(monkeypatch):
     call = FakeAnthropic.calls[-1]
     assert call["model"] == "claude-haiku-5-5"
     assert call["output_config"]["format"]["type"] == "json_schema"
+
+
+def test_tags_become_hashtags():
+    assert drops.hashtag("programming") == "#programming"
+    assert drops.hashtag("soft skills") == "#soft-skills"
+    assert drops.hashtag("  personal   finance ") == "#personal-finance"
+
+
+def test_voice_warnings_are_hidden():
+    import logging
+    from stash.__main__ import not_voice_warning
+
+    def record(msg):
+        return logging.LogRecord("discord.client", logging.WARNING, __file__, 1, msg, None, None)
+
+    assert not not_voice_warning(record("PyNaCl is not installed, voice will NOT be supported"))
+    assert not not_voice_warning(record("davey is not installed, voice will NOT be supported"))
+    assert not_voice_warning(record("Attempting a reconnect in 0.5s"))  # real warnings still show
