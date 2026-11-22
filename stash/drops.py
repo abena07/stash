@@ -30,6 +30,9 @@ RETRIES = 3
 RETRY_DELAY = timedelta(minutes=5)
 # how long one attempt holds a drop, so a slow attempt isn't started twice
 LEASE = timedelta(minutes=2)
+# each tag a link shares with your loved links adds this much to its weight (up to 2 tags: ×3)
+LOVED_TAG_BOOST = 1.0
+MAX_BOOSTED_TAGS = 2
 DAY_NAMES = {1: "monday", 2: "tuesday", 3: "wednesday", 4: "thursday",
              5: "friday", 6: "saturday", 7: "sunday"}
 
@@ -46,6 +49,7 @@ class Candidate:
     reading_minutes: int | None
     times_sent: int
     created_at: datetime
+    tags: tuple[str, ...] = ()
 
 
 def latest_slot(now: datetime, days: list[int], hour: int, tz_name: str) -> datetime | None:
@@ -73,22 +77,25 @@ def due_slot(now: datetime, days: list[int], hour: int, tz_name: str) -> datetim
     return None
 
 
-def weight(link: Candidate, now: datetime) -> float:
-    """rule-based pick weight: older and shorter links first, already-sent ones less often."""
+def weight(link: Candidate, now: datetime, loved_tags: frozenset[str] = frozenset()) -> float:
+    """rule-based pick weight: older and shorter links first, already-sent ones less often,
+    and links sharing tags with ones you've loved more often."""
     age_days = max((now - link.created_at).total_seconds() / 86400, 0)
     age = math.sqrt(1 + age_days)
     length = 1 if link.reading_minutes is None else 1 / (1 + link.reading_minutes / 10)
-    return age * length / (1 + link.times_sent)
+    shared = len(loved_tags.intersection(link.tags))
+    affinity = 1 + LOVED_TAG_BOOST * min(shared, MAX_BOOSTED_TAGS)
+    return age * length * affinity / (1 + link.times_sent)
 
 
 def pick(links: list[Candidate], now: datetime, k: int = PICKS_PER_DROP,
-         rng: random.Random | None = None) -> list[Candidate]:
+         rng: random.Random | None = None, loved_tags: frozenset[str] = frozenset()) -> list[Candidate]:
     """k links, weighted at random without repeats."""
     rng = rng or random.Random()
     pool = list(links)
     chosen = []
     while pool and len(chosen) < k:
-        weights = [weight(link, now) for link in pool]
+        weights = [weight(link, now, loved_tags) for link in pool]
         i = rng.choices(range(len(pool)), weights=weights)[0]
         chosen.append(pool.pop(i))
     return chosen
@@ -97,7 +104,8 @@ def pick(links: list[Candidate], now: datetime, k: int = PICKS_PER_DROP,
 def format_pick(n: int, link: Candidate) -> str:
     title = display_title(link.title, link.url)
     length = f" · {link.reading_minutes} min read" if link.reading_minutes else ""
-    return f"**{n}. {title}**{length}\n{link.url}"
+    tags = f" · {', '.join(link.tags)}" if link.tags else ""
+    return f"**{n}. {title}**{length}{tags}\n{link.url}"
 
 
 Alert = Callable[[int, int, datetime, str], Awaitable[None]]
@@ -197,7 +205,8 @@ async def _attempt(pool, d, now: datetime, get_channel, alert: Alert | None, rng
 
 async def _send_drop(pool, channel: Channel, drop_id: int, guild_id: int, user_id: int,
                      slot: datetime, now: datetime, rng) -> None:
-    picks = pick(await unread_links(pool, guild_id, user_id), now, rng=rng)
+    picks = pick(await unread_links(pool, guild_id, user_id), now, rng=rng,
+                 loved_tags=await loved_tags(pool, guild_id, user_id))
     if not picks:
         # everything was marked read since the slot was claimed: nothing to send, nothing failed
         await pool.execute("UPDATE drops SET sent_at = now() WHERE id = $1", drop_id)
@@ -216,13 +225,22 @@ async def send_on_demand(pool, channel: Channel, guild_id: int, user_id: int, pi
     return await post_picks(pool, channel, drop_id, guild_id, picks, header)
 
 
+async def loved_tags(pool, guild_id: int, user_id: int) -> frozenset[str]:
+    """tags on links this person has marked 👍🏿, read or not."""
+    rows = await pool.fetch(
+        "SELECT DISTINCT unnest(tags) AS tag FROM links WHERE guild_id = $1 AND user_id = $2 AND loved",
+        guild_id, user_id,
+    )
+    return frozenset(r["tag"] for r in rows)
+
+
 async def unread_links(pool, guild_id: int, user_id: int) -> list[Candidate]:
     rows = await pool.fetch(
-        """SELECT id, url, title, reading_minutes, times_sent, created_at FROM links
+        """SELECT id, url, title, reading_minutes, times_sent, created_at, tags FROM links
            WHERE guild_id = $1 AND user_id = $2 AND status = 'unread'""",
         guild_id, user_id,
     )
-    return [Candidate(**dict(r)) for r in rows]
+    return [Candidate(**{**dict(r), "tags": tuple(r["tags"])}) for r in rows]
 
 
 async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks: list[Candidate],

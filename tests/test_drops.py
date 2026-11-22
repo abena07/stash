@@ -342,3 +342,45 @@ def test_scheduler_ignores_drops_sent_from_commands(database):
         return await drops.run_due_drops(pool, at("2026-11-20 12:01"), get_channel)  # friday, no slot
 
     assert loop.run_until_complete(go()) == 0 and channel.sent == []
+
+
+
+# ---- loved tags ----
+
+def tagged(id, tags, age_days=10):
+    return Candidate(id, f"https://example.com/{id}", None, 5, 0,
+                     at("2026-11-18 09:00") - timedelta(days=age_days), tuple(tags))
+
+
+def test_shared_loved_tags_raise_the_weight():
+    now, loved = at("2026-11-18 09:00"), frozenset({"design", "typography"})
+    plain = drops.weight(tagged(1, ["cooking"]), now, loved)
+    one = drops.weight(tagged(2, ["design"]), now, loved)
+    two = drops.weight(tagged(3, ["design", "typography"]), now, loved)
+    assert one == pytest.approx(plain * 2) and two == pytest.approx(plain * 3)
+    assert drops.weight(tagged(4, ["design"]), now) == pytest.approx(plain)  # no loved tags: no change
+
+
+def test_pick_leans_towards_loved_tags():
+    links = [tagged(1, ["design"]), tagged(2, ["cooking"]), tagged(3, ["sport"])]
+    rng, loved = random.Random(1), frozenset({"design"})
+    counts = Counter(c.id for _ in range(3000) for c in pick(links, at("2026-11-18 09:00"), k=1, rng=rng, loved_tags=loved))
+    assert counts[1] / 3000 == pytest.approx(0.5, abs=0.04)  # weight 2 of 4
+
+
+def test_loved_tags_come_from_loved_links_only(database):
+    loop, pool = database
+
+    async def go():
+        await pool.execute("INSERT INTO guilds (guild_id) VALUES (1)")
+        for i, (tags, loved, user) in enumerate([
+            (["design", "ui"], True, 10), (["cooking"], False, 10), (["sport"], True, 20),
+        ]):
+            await pool.execute(
+                """INSERT INTO links (guild_id, user_id, url, url_normalized, tags, loved, status)
+                   VALUES (1, $1, $2, $2, $3, $4, 'read')""",
+                user, f"https://example.com/{i}", tags, loved,
+            )
+        return await drops.loved_tags(pool, 1, 10)
+
+    assert loop.run_until_complete(go()) == {"design", "ui"}
