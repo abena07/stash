@@ -4,7 +4,7 @@ import asyncpg
 import discord
 from discord.ext import commands
 
-from . import api, db
+from . import api, db, welcome
 from .channels import ReadLaterChannels
 from .config import Config
 
@@ -29,6 +29,7 @@ class StashBot(commands.Bot):
         self.read_later = ReadLaterChannels(self.pool)
         for ext in EXTENSIONS:
             await self.load_extension(ext)
+        self.add_dynamic_items(welcome.ModeButton)  # welcome buttons keep working after a restart
         if self.config.api_port:
             self.api_runner = await api.start(api.make_app(self.pool, self.display_names), self.config.api_port)
 
@@ -52,6 +53,8 @@ class StashBot(commands.Bot):
         await self.pool.execute(
             "INSERT INTO guilds (guild_id) VALUES ($1) ON CONFLICT DO NOTHING", guild.id
         )
+        log.info("joined guild %s", guild.id)
+        await welcome.send(self, guild)  # asks personal or shared instead of guessing
 
     async def display_names(self, guild_id: int, user_ids: set[int]) -> dict[int, str]:
         """server display names for these people. anyone who has left is skipped."""
