@@ -5,7 +5,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .. import export as md, modes
+from .. import export as md, modes, tokens
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,8 @@ class Export(commands.Cog):
             await interaction.followup.send(empty, ephemeral=True)
             return
 
-        names = await self._names(interaction.guild, links)
+        ids = {link.saver for link in links} | {n.author_id for link in links for n in link.notes}
+        names = await self.bot.display_names(interaction.guild_id, ids)
         data = md.build_zip(links, lambda uid: names.get(uid, "someone"), show_saver=shared)
         if len(data) > MAX_BYTES:
             await interaction.followup.send(
@@ -51,19 +52,31 @@ class Export(commands.Cog):
             ephemeral=True,
         )
 
-    async def _names(self, guild: discord.Guild, links: list[md.ExportLink]) -> dict[int, str]:
-        """display names for everyone who saved a link or wrote a note in the export."""
-        ids = {link.saver for link in links} | {n.author_id for link in links for n in link.notes}
-        names = {}
-        for uid in ids:
-            member = guild.get_member(uid)
-            if member is None:
-                try:
-                    member = await guild.fetch_member(uid)
-                except discord.HTTPException:
-                    continue  # they've left the server
-            names[uid] = member.display_name
-        return names
+    @app_commands.command(name="connect", description="connect the stash obsidian plugin to your links")
+    @app_commands.describe(app="what to connect")
+    @app_commands.choices(app=[app_commands.Choice(name="obsidian", value="obsidian")])
+    @app_commands.guild_only()
+    async def connect(self, interaction: discord.Interaction, app: app_commands.Choice[str]) -> None:
+        code = await tokens.create(self.bot.pool, interaction.guild_id, interaction.user.id, app.value)
+        log.info("guild %s: %s connect code created", interaction.guild_id, app.value)
+        await interaction.response.send_message(
+            "here's your code for the stash plugin in obsidian. paste it into the plugin's settings.\n"
+            f"||`{code}`||\n"
+            "only you can see this. it works like a password, so don't share it. "
+            "running `/connect obsidian` again makes a new one and the old one stops working. "
+            "`/disconnect obsidian` turns it off.",
+            ephemeral=True,
+        )
+
+    @app_commands.command(name="disconnect", description="stop the stash obsidian plugin from syncing")
+    @app_commands.describe(app="what to disconnect")
+    @app_commands.choices(app=[app_commands.Choice(name="obsidian", value="obsidian")])
+    @app_commands.guild_only()
+    async def disconnect(self, interaction: discord.Interaction, app: app_commands.Choice[str]) -> None:
+        gone = await tokens.revoke(self.bot.pool, interaction.guild_id, interaction.user.id, app.value)
+        await interaction.response.send_message(
+            "done. your obsidian code no longer works." if gone else "nothing was connected.", ephemeral=True
+        )
 
 
 async def setup(bot) -> None:

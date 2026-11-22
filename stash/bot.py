@@ -4,7 +4,7 @@ import asyncpg
 import discord
 from discord.ext import commands
 
-from . import db
+from . import api, db
 from .channels import ReadLaterChannels
 from .config import Config
 
@@ -22,12 +22,15 @@ class StashBot(commands.Bot):
         self.config = config
         self.pool: asyncpg.Pool | None = None
         self.read_later: ReadLaterChannels | None = None
+        self.api_runner = None
 
     async def setup_hook(self) -> None:
         self.pool = await db.connect(self.config.database_url)
         self.read_later = ReadLaterChannels(self.pool)
         for ext in EXTENSIONS:
             await self.load_extension(ext)
+        if self.config.api_port:
+            self.api_runner = await api.start(api.make_app(self.pool, self.display_names), self.config.api_port)
 
         if self.config.dev_guild_id:
             guild = discord.Object(id=self.config.dev_guild_id)
@@ -50,7 +53,25 @@ class StashBot(commands.Bot):
             "INSERT INTO guilds (guild_id) VALUES ($1) ON CONFLICT DO NOTHING", guild.id
         )
 
+    async def display_names(self, guild_id: int, user_ids: set[int]) -> dict[int, str]:
+        """server display names for these people. anyone who has left is skipped."""
+        guild = self.get_guild(guild_id)
+        if guild is None:
+            return {}
+        names = {}
+        for uid in user_ids:
+            member = guild.get_member(uid)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(uid)
+                except discord.HTTPException:
+                    continue
+            names[uid] = member.display_name
+        return names
+
     async def close(self) -> None:
+        if self.api_runner:
+            await self.api_runner.cleanup()
         await super().close()
         if self.pool:
             await self.pool.close()

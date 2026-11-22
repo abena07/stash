@@ -39,6 +39,7 @@ def test_markdown_has_frontmatter_and_notes():
         "loved: true\n"
         'tags: ["programming", "git"]\n'
         "source: stash\n"
+        "stash_id: 1\n"
         "---\n"
         "\n"
         "# inside .git\n"
