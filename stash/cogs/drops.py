@@ -88,7 +88,8 @@ class Drops(commands.Cog):
         if not links:
             await interaction.response.send_message(NOTHING_UNREAD, ephemeral=True)
             return
-        chosen = drops.pick(links, datetime.now(timezone.utc))
+        loved = await drops.loved_tags(self.bot.pool, interaction.guild_id, interaction.user.id)
+        chosen = drops.pick(links, datetime.now(timezone.utc), loved_tags=loved)
         await drops.send_on_demand(
             self.bot.pool, InteractionChannel(interaction), interaction.guild_id,
             interaction.user.id, chosen, "📬 your picks",
