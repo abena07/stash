@@ -9,6 +9,7 @@ class Config:
     dev_guild_id: int | None
     log_level: str
     alert_webhook_url: str | None = None
+    secret_key: str | None = None
 
 
 def load() -> Config:
@@ -22,4 +23,5 @@ def load() -> Config:
         dev_guild_id=int(dev_guild) if dev_guild else None,
         log_level=os.environ.get("LOG_LEVEL", "INFO"),
         alert_webhook_url=os.environ.get("ALERT_WEBHOOK_URL") or None,
+        secret_key=os.environ.get("STASH_SECRET_KEY") or None,
     )

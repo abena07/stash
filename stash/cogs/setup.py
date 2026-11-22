@@ -4,6 +4,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from .. import keys
+
 log = logging.getLogger(__name__)
 
 
@@ -64,6 +66,72 @@ class Setup(commands.Cog):
         log.info("guild %s: alert channel set to %s", guild.id, alerts.id)
         await interaction.response.send_message(
             f"done. alerts about failed drops will go to {alerts.mention}.", ephemeral=True
+        )
+
+
+    @app_commands.command(description="set this server's claude api key, used to tag your links")
+    @app_commands.describe(remove="forget the stored key (tagging stops)")
+    @app_commands.guild_only()
+    async def setkey(self, interaction: discord.Interaction, remove: bool = False) -> None:
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message(
+                "only people who can manage this server can set the key", ephemeral=True
+            )
+            return
+        if remove:
+            await self.bot.pool.execute(
+                "UPDATE guilds SET claude_key_enc = NULL WHERE guild_id = $1", interaction.guild_id
+            )
+            await interaction.response.send_message(
+                "done. the key is gone and new links won't be tagged.", ephemeral=True
+            )
+            return
+        if not self.bot.config.secret_key:
+            await interaction.response.send_message(
+                "this bot isn't set up to store keys yet (the host needs to set STASH_SECRET_KEY).",
+                ephemeral=True,
+            )
+            return
+        # a modal keeps the key out of the channel and out of the command history
+        await interaction.response.send_modal(KeyModal(self.bot))
+
+
+class KeyModal(discord.ui.Modal, title="claude api key"):
+    key = discord.ui.TextInput(
+        label="api key from console.anthropic.com",
+        placeholder="sk-ant-...",
+        min_length=20,
+        max_length=200,
+    )
+
+    def __init__(self, bot):
+        super().__init__()
+        self.bot = bot
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        api_key = self.key.value.strip()
+        if not keys.looks_like_key(api_key):
+            await interaction.response.send_message(
+                "that doesn't look like a claude api key (they start with `sk-ant-`).", ephemeral=True
+            )
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        problem = await keys.check(api_key)
+        if problem:
+            await interaction.followup.send(problem, ephemeral=True)
+            return
+        await self.bot.pool.execute(
+            "INSERT INTO guilds (guild_id) VALUES ($1) ON CONFLICT DO NOTHING", interaction.guild_id
+        )
+        await self.bot.pool.execute(
+            "UPDATE guilds SET claude_key_enc = $2 WHERE guild_id = $1",
+            interaction.guild_id, keys.encrypt(self.bot.config.secret_key, api_key),
+        )
+        log.info("guild %s: claude key set", interaction.guild_id)
+        await interaction.followup.send(
+            "key saved (encrypted). new links you save will be tagged by interest. "
+            "usage is billed to this key.",
+            ephemeral=True,
         )
 
 

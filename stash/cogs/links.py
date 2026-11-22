@@ -2,11 +2,12 @@ import asyncio
 import logging
 
 import aiohttp
+import anthropic
 import asyncpg
 import discord
 from discord.ext import commands
 
-from .. import metadata
+from .. import keys, metadata, tagging
 from ..urls import extract_urls, normalize
 
 log = logging.getLogger(__name__)
@@ -155,6 +156,30 @@ class Links(commands.Cog):
         """background work once links are saved: fetch metadata, then open the notes thread."""
         titles = await asyncio.gather(*(self._fill_metadata(link_id, url) for link_id, url in new))
         await self._open_thread(message, new, titles[0])
+        await self._tag(message.guild.id, message.author.id, [link_id for link_id, _ in new])
+
+    async def _tag(self, guild_id: int, user_id: int, link_ids: list[int]) -> None:
+        """tag links with claude haiku (#4), only when the server has set its own key (#11)."""
+        blob = await self.bot.pool.fetchval("SELECT claude_key_enc FROM guilds WHERE guild_id = $1", guild_id)
+        api_key = keys.decrypt(self.bot.config.secret_key, blob)
+        if api_key is None:
+            return
+        existing = [r["tag"] for r in await self.bot.pool.fetch(
+            """SELECT DISTINCT unnest(tags) AS tag FROM links
+               WHERE guild_id = $1 AND user_id = $2 ORDER BY tag LIMIT 100""",
+            guild_id, user_id,
+        )]
+        async with anthropic.AsyncAnthropic(api_key=api_key, max_retries=2, timeout=30) as client:
+            for link_id in link_ids:
+                link = await self.bot.pool.fetchrow(
+                    "SELECT url, title, description FROM links WHERE id = $1", link_id
+                )
+                tags = await tagging.tag_link(client, link["url"], link["title"], link["description"], existing)
+                if not tags:
+                    continue
+                await self.bot.pool.execute("UPDATE links SET tags = $2 WHERE id = $1", link_id, tags)
+                existing = sorted(set(existing) | set(tags))
+                log.info("guild %s: tagged link %s: %s", guild_id, link_id, ", ".join(tags))
 
     async def _fill_metadata(self, link_id: int, url: str) -> str | None:
         """runs after the link is saved; on any failure the link just keeps no metadata.

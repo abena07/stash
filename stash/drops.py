@@ -46,6 +46,7 @@ class Candidate:
     reading_minutes: int | None
     times_sent: int
     created_at: datetime
+    tags: tuple[str, ...] = ()
 
 
 def latest_slot(now: datetime, days: list[int], hour: int, tz_name: str) -> datetime | None:
@@ -97,7 +98,8 @@ def pick(links: list[Candidate], now: datetime, k: int = PICKS_PER_DROP,
 def format_pick(n: int, link: Candidate) -> str:
     title = display_title(link.title, link.url)
     length = f" · {link.reading_minutes} min read" if link.reading_minutes else ""
-    return f"**{n}. {title}**{length}\n{link.url}"
+    tags = f" · {', '.join(link.tags)}" if link.tags else ""
+    return f"**{n}. {title}**{length}{tags}\n{link.url}"
 
 
 Alert = Callable[[int, int, datetime, str], Awaitable[None]]
@@ -218,11 +220,11 @@ async def send_on_demand(pool, channel: Channel, guild_id: int, user_id: int, pi
 
 async def unread_links(pool, guild_id: int, user_id: int) -> list[Candidate]:
     rows = await pool.fetch(
-        """SELECT id, url, title, reading_minutes, times_sent, created_at FROM links
+        """SELECT id, url, title, reading_minutes, times_sent, created_at, tags FROM links
            WHERE guild_id = $1 AND user_id = $2 AND status = 'unread'""",
         guild_id, user_id,
     )
-    return [Candidate(**dict(r)) for r in rows]
+    return [Candidate(**{**dict(r), "tags": tuple(r["tags"])}) for r in rows]
 
 
 async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks: list[Candidate],
