@@ -12,7 +12,7 @@ a small discord bot that saves the links you post and brings two back every wedn
 - **opens a notes thread** on each saved post, named after the page with its reading time. anything written there is kept as a note.
 - **drops picks** on your schedule (default wednesday and sunday, 09:00 utc), favouring older and shorter reads.
 - **✅ marks read, 👍 marks loved.** links sent three times without being read are archived.
-- **personal or shared:** your own queue, or one pile for a group server (`/setup mode`).
+- **personal or shared:** your own queue, or one pile for a group server. when stash joins a server it posts a hello asking which ("just me" or "our group"); change it later with `/setup mode`.
 - **optional ai tags** with your own key (`/setkey`: claude, openai, gemini, deepseek or openrouter), stored encrypted.
 - **export:** `/export` for a markdown zip, or the [obsidian plugin](https://github.com/abena07/stash-obsidian) to sync into your vault and make a monthly roundup of what you loved.
 
