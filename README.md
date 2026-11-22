@@ -1,41 +1,49 @@
 # stash
 
-a discord bot that saves links from a `#read-later` channel and drops a couple of picks on a schedule.
+a small discord bot that saves the links you post and brings two back every wednesday and sunday, so they actually get read.
+
+**[add stash to discord](https://stash.bennett-eghan.com)** · [obsidian plugin](https://github.com/abena07/stash-obsidian) · [self-host it](docs/self-hosting.md)
 
 ![stash system design](docs/system-design.png)
 
-## run locally
+## what it does
 
-needs python 3.13 and postgres.
+- **saves links** posted in `#read-later` (or any channel you pick with `/setup channel`): 🔖 when saved, 🔁 if it's already in your queue.
+- **opens a notes thread** on each saved post, named after the page with its reading time. anything written there is kept as a note.
+- **drops picks** on your schedule (default wednesday and sunday, 09:00 utc), favouring older and shorter reads.
+- **✅ marks read, 👍 marks loved.** links sent three times without being read are archived.
+- **personal or shared:** your own queue, or one pile for a group server (`/setup mode`).
+- **optional ai tags** with your own key (`/setkey`: claude, openai, gemini, deepseek or openrouter), stored encrypted.
+- **export:** `/export` for a markdown zip, or the [obsidian plugin](https://github.com/abena07/stash-obsidian) to sync into your vault and make a monthly roundup of what you loved.
 
-```sh
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in DISCORD_TOKEN
-createdb stash
-set -a && source .env && set +a
-python -m stash
-```
+## commands
 
-migrations in `migrations/` apply automatically on startup.
+| command | what it does |
+|---|---|
+| `/picks` | two picks from your queue, right now |
+| `/random` | one random unread link |
+| `/schedule` | see or change drop days, time and timezone |
+| `/setup` | read-later channel, personal or shared mode, and where alerts go |
+| `/export` | your links and notes as markdown |
+| `/setkey` | bring your own ai key for tagging |
+| `/connect obsidian` | a code for the obsidian plugin |
 
-in the discord developer portal, enable the **message content** intent for the bot, and invite it with the `bot` and `applications.commands` scopes. set `DEV_GUILD_ID` to your test server so slash commands show up instantly.
+## self-hosting and development
 
-make a channel named `#read-later` (or pick any channel with `/setup channel`) and give the bot **view channel**, **send messages**, **add reactions**, **read message history**, **create public threads** and **send messages in threads** there. any link posted in it is saved: 🔖 means saved, 🔁 means it's already in your queue. each saved post gets a thread named after the page; anything you write in it is kept as a note on the link.
+see **[docs/self-hosting.md](docs/self-hosting.md)**: creating the discord bot, deploying on railway (or anywhere with python and postgres), every setting, running it locally, and the tests.
 
-by default everyone in a server has their own queue. `/setup mode:shared` turns the server into one reading pile: each drop is one set of picks for the group, starting with @everyone and showing who saved each link. for that @everyone to notify people, also give the bot **mention @everyone, @here, and all roles** in `#read-later`.
+## how it's built
 
-## tests
+one python service (discord.py + asyncpg) and one postgres database. everything is stored per server and per person. [`docs/system-design.md`](docs/system-design.md) has the design notes behind the drawing above.
 
-```sh
-pip install -r requirements-dev.txt
-pytest
-```
+| folder | what's in it |
+|---|---|
+| `stash/` | the bot: saving, drops, reactions, notes, tagging, export, the plugin api |
+| `migrations/` | database changes, applied on startup |
+| `obsidian/` | the obsidian plugin (mirrored to [stash-obsidian](https://github.com/abena07/stash-obsidian)) |
+| `site/` | the landing page, privacy policy and terms |
+| `tests/` | `pytest`, run in ci on every pull request |
 
-## deploy to railway
+## license
 
-1. create a project from this repo and add a postgres service.
-2. on the bot service, set `DISCORD_TOKEN` and `DATABASE_URL=${{Postgres.DATABASE_URL}}`.
-3. deploy. `railway.json` sets the start command (`python -m stash`).
-
-full self-hosting docs come with issue #13.
+[mit](LICENSE)
