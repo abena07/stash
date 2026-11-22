@@ -1,10 +1,11 @@
 import logging
 
+import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from .. import keys
+from .. import keys, providers
 
 log = logging.getLogger(__name__)
 
@@ -69,18 +70,44 @@ class Setup(commands.Cog):
         )
 
 
-    @app_commands.command(description="set this server's claude api key, used to tag your links")
-    @app_commands.describe(remove="forget the stored key (tagging stops)")
+    @app_commands.command(description="bring your own ai key (claude, openai, gemini, deepseek…) to tag links")
+    @app_commands.describe(
+        provider="which ai company the key is from",
+        remove="forget the stored key (tagging stops)",
+    )
+    @app_commands.choices(provider=[
+        app_commands.Choice(name=p.name, value=p.id) for p in providers.PROVIDERS.values()
+    ])
     @app_commands.guild_only()
-    async def setkey(self, interaction: discord.Interaction, remove: bool = False) -> None:
+    async def setkey(
+        self,
+        interaction: discord.Interaction,
+        provider: app_commands.Choice[str] | None = None,
+        remove: bool = False,
+    ) -> None:
+        pool = self.bot.pool
+        if provider is None and not remove:
+            row = await pool.fetchrow(
+                "SELECT ai_provider, ai_model, ai_key_enc IS NOT NULL AS has_key FROM guilds WHERE guild_id = $1",
+                interaction.guild_id,
+            )
+            if row and row["has_key"] and row["ai_provider"] in providers.PROVIDERS:
+                p = providers.PROVIDERS[row["ai_provider"]]
+                text = f"links are tagged with **{p.name}** using `{row['ai_model'] or p.default_model}`."
+            else:
+                text = "no ai key set, so links aren't tagged. pick a provider: `/setkey provider:…`"
+            await interaction.response.send_message(text, ephemeral=True)
+            return
+
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message(
                 "only people who can manage this server can set the key", ephemeral=True
             )
             return
         if remove:
-            await self.bot.pool.execute(
-                "UPDATE guilds SET claude_key_enc = NULL WHERE guild_id = $1", interaction.guild_id
+            await pool.execute(
+                "UPDATE guilds SET ai_key_enc = NULL, ai_provider = NULL, ai_model = NULL WHERE guild_id = $1",
+                interaction.guild_id,
             )
             await interaction.response.send_message(
                 "done. the key is gone and new links won't be tagged.", ephemeral=True
@@ -93,43 +120,44 @@ class Setup(commands.Cog):
             )
             return
         # a modal keeps the key out of the channel and out of the command history
-        await interaction.response.send_modal(KeyModal(self.bot))
+        await interaction.response.send_modal(KeyModal(self.bot, providers.PROVIDERS[provider.value]))
 
 
-class KeyModal(discord.ui.Modal, title="claude api key"):
-    key = discord.ui.TextInput(
-        label="api key from console.anthropic.com",
-        placeholder="sk-ant-...",
-        min_length=20,
-        max_length=200,
-    )
-
-    def __init__(self, bot):
-        super().__init__()
+class KeyModal(discord.ui.Modal):
+    def __init__(self, bot, provider: providers.Provider):
+        super().__init__(title=f"{provider.name} key"[:45])
         self.bot = bot
+        self.provider = provider
+        self.key = discord.ui.TextInput(
+            label=f"api key from {provider.console}"[:45], min_length=10, max_length=300
+        )
+        self.model = discord.ui.TextInput(
+            label="model (a cheap one is filled in)", default=provider.default_model, max_length=100
+        )
+        self.add_item(self.key)
+        self.add_item(self.model)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        api_key = self.key.value.strip()
-        if not keys.looks_like_key(api_key):
-            await interaction.response.send_message(
-                "that doesn't look like a claude api key (they start with `sk-ant-`).", ephemeral=True
-            )
+        api_key, model = self.key.value.strip(), self.model.value.strip()
+        if " " in api_key:
+            await interaction.response.send_message("that key has a space in it. paste it again?", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True, thinking=True)
-        problem = await keys.check(api_key)
-        if problem:
-            await interaction.followup.send(problem, ephemeral=True)
+        try:
+            async with aiohttp.ClientSession() as session:
+                await providers.check(session, self.provider, api_key, model)
+        except providers.ProviderError as e:
+            await interaction.followup.send(str(e), ephemeral=True)
             return
-        await self.bot.pool.execute(
-            "INSERT INTO guilds (guild_id) VALUES ($1) ON CONFLICT DO NOTHING", interaction.guild_id
+        pool = self.bot.pool
+        await pool.execute("INSERT INTO guilds (guild_id) VALUES ($1) ON CONFLICT DO NOTHING", interaction.guild_id)
+        await pool.execute(
+            "UPDATE guilds SET ai_provider = $2, ai_model = $3, ai_key_enc = $4 WHERE guild_id = $1",
+            interaction.guild_id, self.provider.id, model, keys.encrypt(self.bot.config.secret_key, api_key),
         )
-        await self.bot.pool.execute(
-            "UPDATE guilds SET claude_key_enc = $2 WHERE guild_id = $1",
-            interaction.guild_id, keys.encrypt(self.bot.config.secret_key, api_key),
-        )
-        log.info("guild %s: claude key set", interaction.guild_id)
+        log.info("guild %s: ai key set for %s (%s)", interaction.guild_id, self.provider.id, model)
         await interaction.followup.send(
-            "key saved (encrypted). new links you save will be tagged by interest. "
+            f"key saved (encrypted). new links will be tagged with {self.provider.name} using `{model}`. "
             "usage is billed to this key.",
             ephemeral=True,
         )
