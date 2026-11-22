@@ -23,6 +23,8 @@ in the discord developer portal, enable the **message content** intent for the b
 
 make a channel named `#read-later` and give the bot **view channel**, **send messages**, **add reactions**, **read message history**, **create public threads** and **send messages in threads** there. any link posted in it is saved: 🔖 means saved, 🔁 means it's already in your queue. each saved post gets a thread named after the page; anything you write in it is kept as a note on the link.
 
+by default everyone in a server has their own queue. `/setup mode:shared` turns the server into one reading pile: each drop is one set of picks for the group, starting with @everyone and showing who saved each link. for that @everyone to notify people, also give the bot **mention @everyone, @here, and all roles** in `#read-later`.
+
 ## tests
 
 ```sh

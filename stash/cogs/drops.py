@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from .. import alerts, drops
+from .. import alerts, drops, modes
 from .links import READ_LATER_CHANNEL
 
 log = logging.getLogger(__name__)
@@ -84,27 +84,31 @@ class Drops(commands.Cog):
     @app_commands.command(description="get a couple of picks from your saved links now")
     @app_commands.guild_only()
     async def picks(self, interaction: discord.Interaction) -> None:
-        links = await drops.unread_links(self.bot.pool, interaction.guild_id, interaction.user.id)
+        shared = await modes.is_shared(self.bot.pool, interaction.guild_id)
+        links = await drops.unread_links(self.bot.pool, interaction.guild_id, None if shared else interaction.user.id)
         if not links:
             await interaction.response.send_message(NOTHING_UNREAD, ephemeral=True)
             return
-        loved = await drops.loved_tags(self.bot.pool, interaction.guild_id, interaction.user.id)
+        loved = frozenset() if shared else await drops.loved_tags(
+            self.bot.pool, interaction.guild_id, interaction.user.id
+        )
         chosen = drops.pick(links, datetime.now(timezone.utc), loved_tags=loved)
         await drops.send_on_demand(
             self.bot.pool, InteractionChannel(interaction), interaction.guild_id,
-            interaction.user.id, chosen, "📬 your picks",
+            interaction.user.id, chosen, "📬 picks from the pile" if shared else "📬 your picks", credit=shared,
         )
 
     @app_commands.command(description="get one random link from your saved links")
     @app_commands.guild_only()
     async def random(self, interaction: discord.Interaction) -> None:
-        links = await drops.unread_links(self.bot.pool, interaction.guild_id, interaction.user.id)
+        shared = await modes.is_shared(self.bot.pool, interaction.guild_id)
+        links = await drops.unread_links(self.bot.pool, interaction.guild_id, None if shared else interaction.user.id)
         if not links:
             await interaction.response.send_message(NOTHING_UNREAD, ephemeral=True)
             return
         await drops.send_on_demand(
             self.bot.pool, InteractionChannel(interaction), interaction.guild_id,
-            interaction.user.id, [random.choice(links)], "🎲 a random pick",
+            interaction.user.id, [random.choice(links)], "🎲 a random pick", credit=shared,
         )
 
     @app_commands.command(description="see or change when drops are sent")

@@ -19,6 +19,7 @@ import asyncpg
 import discord
 
 from .metadata import display_title
+from .modes import GROUP, SHARED
 
 log = logging.getLogger(__name__)
 
@@ -53,6 +54,7 @@ class Candidate:
     times_sent: int
     created_at: datetime
     tags: tuple[str, ...] = ()
+    saver: int | None = None  # who saved it; shown on picks in shared servers
 
 
 def latest_slot(now: datetime, days: list[int], hour: int, tz_name: str) -> datetime | None:
@@ -104,11 +106,12 @@ def pick(links: list[Candidate], now: datetime, k: int = PICKS_PER_DROP,
     return chosen
 
 
-def format_pick(n: int, link: Candidate) -> str:
+def format_pick(n: int, link: Candidate, credit: bool = False) -> str:
     title = display_title(link.title, link.url)
     length = f" · {link.reading_minutes} min read" if link.reading_minutes else ""
     tags = f" · {', '.join(link.tags)}" if link.tags else ""
-    return f"**{n}. {title}**{length}{tags}\n{link.url}"
+    saved_by = f" · saved by <@{link.saver}>" if credit and link.saver else ""
+    return f"**{n}. {title}**{length}{tags}{saved_by}\n{link.url}"
 
 
 Alert = Callable[[int, int, datetime, str], Awaitable[None]]
@@ -159,18 +162,20 @@ async def run_due_drops(
 
 
 async def _claim_new_slots(pool, now: datetime) -> None:
-    guilds = await pool.fetch("SELECT guild_id, drop_days, drop_hour, timezone FROM guilds")
+    guilds = await pool.fetch("SELECT guild_id, drop_days, drop_hour, timezone, mode FROM guilds")
     for g in guilds:
         slot = due_slot(now, list(g["drop_days"]), g["drop_hour"], g["timezone"])
         if slot is None:
             continue
-        # one row per (guild, user, slot): the unique key means a slot is only ever claimed once
+        # one row per (guild, user, slot): the unique key means a slot is only ever claimed once.
+        # a shared server gets a single group drop, stored under the GROUP user id.
+        who = "$4::bigint" if g["mode"] == SHARED else "user_id"
         await pool.execute(
-            """INSERT INTO drops (guild_id, user_id, scheduled_for, next_attempt_at)
-               SELECT DISTINCT guild_id, user_id, $2::timestamptz, $3::timestamptz
+            f"""INSERT INTO drops (guild_id, user_id, scheduled_for, next_attempt_at)
+               SELECT DISTINCT guild_id, {who}, $2::timestamptz, $3::timestamptz
                  FROM links WHERE guild_id = $1 AND status = 'unread'
                ON CONFLICT (guild_id, user_id, scheduled_for) DO NOTHING""",
-            g["guild_id"], slot, now,
+            g["guild_id"], slot, now, *([GROUP] if g["mode"] == SHARED else []),
         )
 
 
@@ -208,27 +213,31 @@ async def _attempt(pool, d, now: datetime, get_channel, alert: Alert | None, rng
 
 async def _send_drop(pool, channel: Channel, drop_id: int, guild_id: int, user_id: int,
                      slot: datetime, now: datetime, rng) -> None:
-    unread = await unread_links(pool, guild_id, user_id)
+    group = user_id == GROUP
+    unread = await unread_links(pool, guild_id, None if group else user_id)
     # sent ARCHIVE_AFTER_SENDS times and still not read: archive instead of sending again (#12)
     stale = [link for link in unread if link.times_sent >= ARCHIVE_AFTER_SENDS]
     fresh = [link for link in unread if link.times_sent < ARCHIVE_AFTER_SENDS]
-    picks = pick(fresh, now, rng=rng, loved_tags=await loved_tags(pool, guild_id, user_id))
+    # loved tags steer personal picks only; shared piles rely on age, length and archiving
+    loved = frozenset() if group else await loved_tags(pool, guild_id, user_id)
+    picks = pick(fresh, now, rng=rng, loved_tags=loved)
     if not picks and not stale:
         # everything was marked read since the slot was claimed: nothing to send, nothing failed
         await pool.execute("UPDATE drops SET sent_at = now() WHERE id = $1", drop_id)
         return
-    header = f"📬 <@{user_id}> your {DAY_NAMES[slot.isoweekday()]} picks"
-    await post_picks(pool, channel, drop_id, guild_id, picks, header, archive=stale)
+    day = DAY_NAMES[slot.isoweekday()]
+    header = f"📬 @everyone {day}'s picks" if group else f"📬 <@{user_id}> your {day} picks"
+    await post_picks(pool, channel, drop_id, guild_id, picks, header, archive=stale, credit=group)
 
 
 async def send_on_demand(pool, channel: Channel, guild_id: int, user_id: int, picks: list[Candidate],
-                         header: str) -> int:
+                         header: str, credit: bool = False) -> int:
     """post picks asked for with a command. recorded as a drop so reactions map back to the links."""
     drop_id = await pool.fetchval(
         "INSERT INTO drops (guild_id, user_id, scheduled_for) VALUES ($1, $2, clock_timestamp()) RETURNING id",
         guild_id, user_id,
     )
-    return await post_picks(pool, channel, drop_id, guild_id, picks, header)
+    return await post_picks(pool, channel, drop_id, guild_id, picks, header, credit=credit)
 
 
 async def loved_tags(pool, guild_id: int, user_id: int) -> frozenset[str]:
@@ -240,21 +249,26 @@ async def loved_tags(pool, guild_id: int, user_id: int) -> frozenset[str]:
     return frozenset(r["tag"] for r in rows)
 
 
-async def unread_links(pool, guild_id: int, user_id: int) -> list[Candidate]:
+async def unread_links(pool, guild_id: int, user_id: int | None) -> list[Candidate]:
+    """one person's unread links, or (user_id None) the whole server's pile."""
     rows = await pool.fetch(
-        """SELECT id, url, title, reading_minutes, times_sent, created_at, tags FROM links
-           WHERE guild_id = $1 AND user_id = $2 AND status = 'unread'""",
+        """SELECT id, url, title, reading_minutes, times_sent, created_at, tags, user_id AS saver FROM links
+           WHERE guild_id = $1 AND ($2::bigint IS NULL OR user_id = $2) AND status = 'unread'""",
         guild_id, user_id,
     )
     return [Candidate(**{**dict(r), "tags": tuple(r["tags"])}) for r in rows]
 
 
 async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks: list[Candidate],
-                     header: str, archive: list[Candidate] = ()) -> int:
+                     header: str, archive: list[Candidate] = (), credit: bool = False) -> int:
     """post a header and one message per pick, then record what was sent. returns picks posted.
     links in `archive` are archived and listed in a note. raises if none of the picks could be
     posted, and then nothing is archived either."""
-    mention = discord.AllowedMentions(users=True, everyone=False, roles=False)
+    # users: the personal drop's <@person>. everyone: lets a group drop's @everyone notify the server
+    pings_everyone = header.startswith("📬 @everyone")
+    mention = discord.AllowedMentions(users=True, everyone=pings_everyone, roles=False)
+    # "saved by @person" notifies them, unless @everyone already did: one notification each
+    notify_savers = credit and not pings_everyone
     if not picks:
         header = header.replace(" picks", " drop")  # only an archive note this time
     await channel.send(header, allowed_mentions=mention)
@@ -262,7 +276,8 @@ async def post_picks(pool, channel: Channel, drop_id: int, guild_id: int, picks:
     error = None
     for n, link in enumerate(picks, 1):
         try:
-            msg = await channel.send(format_pick(n, link), allowed_mentions=discord.AllowedMentions.none())
+            msg = await channel.send(format_pick(n, link, credit),
+                                     allowed_mentions=discord.AllowedMentions(users=notify_savers, everyone=False, roles=False))
         except discord.HTTPException as e:
             log.warning("guild %s: couldn't post link %s: %s", guild_id, link.id, e)
             error = e
