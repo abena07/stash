@@ -15,6 +15,15 @@ READ_LATER_CHANNEL = "read-later"
 SAVED = "🔖"
 ALREADY_QUEUED = "🔁"
 FETCH_CONCURRENCY = 4
+THREAD_ARCHIVE_MINUTES = 10080  # a week; posting in an archived thread reopens it
+THREAD_NAME_LIMIT = 100  # discord's maximum
+
+
+def thread_name(title: str | None, url: str) -> str:
+    name = metadata.display_title(title, url)
+    if len(name) > THREAD_NAME_LIMIT:
+        name = name[: THREAD_NAME_LIMIT - 1].rstrip() + "…"
+    return name
 
 
 def is_read_later(channel: discord.abc.Messageable) -> bool:
@@ -129,8 +138,8 @@ class Links(commands.Cog):
         log.info(
             "guild %s: saved %d link(s), %d duplicate(s)", message.guild.id, len(new), len(dupes)
         )
-        for link_id, url in new:
-            task = asyncio.create_task(self._fill_metadata(link_id, url))
+        if new:
+            task = asyncio.create_task(self._after_save(message, new))
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
 
@@ -142,22 +151,46 @@ class Links(commands.Cog):
             if dupe["status"] != "unread":
                 await _ask_readd(message, dupe)
 
-    async def _fill_metadata(self, link_id: int, url: str) -> None:
-        """runs after the link is saved; on any failure the link just keeps no metadata."""
+    async def _after_save(self, message: discord.Message, new: list[tuple[int, str]]) -> None:
+        """background work once links are saved: fetch metadata, then open the notes thread."""
+        titles = await asyncio.gather(*(self._fill_metadata(link_id, url) for link_id, url in new))
+        await self._open_thread(message, new, titles[0])
+
+    async def _fill_metadata(self, link_id: int, url: str) -> str | None:
+        """runs after the link is saved; on any failure the link just keeps no metadata.
+        returns the title, if one was found."""
         try:
             async with self._fetch_slots:
                 meta = await metadata.fetch(self.http, url)
             if meta is None:
-                return
+                return None
             await self.bot.pool.execute(
                 """UPDATE links SET title = $2, description = $3, reading_minutes = $4
                    WHERE id = $1""",
                 link_id, meta.title, meta.description, meta.reading_minutes,
             )
+            return meta.title
         except asyncio.CancelledError:
             raise
         except Exception:
             log.exception("metadata fetch for link %s failed", link_id)
+            return None
+
+    async def _open_thread(self, message: discord.Message, new: list[tuple[int, str]],
+                           title: str | None) -> None:
+        """one notes thread per message (discord allows one), named after its first link (#5)."""
+        first_url = new[0][1]
+        try:
+            thread = await message.create_thread(
+                name=thread_name(title, first_url), auto_archive_duration=THREAD_ARCHIVE_MINUTES
+            )
+        except discord.HTTPException as e:
+            log.warning("guild %s: couldn't open a notes thread: %s", message.guild.id, e)
+            return
+        await self.bot.pool.execute(
+            "UPDATE links SET thread_id = $1 WHERE id = ANY($2::bigint[])",
+            thread.id, [link_id for link_id, _ in new],
+        )
 
 
 async def _react(message: discord.Message, emoji: str) -> None:
