@@ -474,3 +474,49 @@ def test_long_archive_notes_are_shortened():
              for i in range(7)]
     note = drops.archive_note(links)
     assert "*post 4* and 2 more were sent" in note and "post 5" not in note
+
+
+
+# ---- only links saved before the drop's time (catch-up shouldn't send fresh links back) ----
+
+def test_a_link_saved_after_drop_time_waits_for_the_next_drop(database):
+    loop, pool = database
+    channel = FakeChannel()
+
+    async def go():
+        await pool.execute("INSERT INTO guilds (guild_id) VALUES (1)")
+        await pool.execute(
+            """INSERT INTO links (guild_id, user_id, url, url_normalized, title, created_at)
+               VALUES (1, 10, 'https://example.com/fresh', 'https://example.com/fresh', 'fresh', $1)""",
+            at("2026-11-18 12:15"),  # saved at 12:15, after the 09:00 drop
+        )
+
+        async def get_channel(guild_id):
+            return channel
+
+        return await drops.run_due_drops(pool, at("2026-11-18 12:16"), get_channel)  # still in the catch-up window
+
+    assert loop.run_until_complete(go()) == 0 and channel.sent == []
+
+
+def test_catch_up_only_sends_links_saved_before_drop_time(database):
+    loop, pool = database
+    channel = FakeChannel()
+
+    async def go():
+        await pool.execute("INSERT INTO guilds (guild_id) VALUES (1)")
+        for title, saved in [("older", "2026-11-17 20:00"), ("fresh", "2026-11-18 12:15")]:
+            await pool.execute(
+                """INSERT INTO links (guild_id, user_id, url, url_normalized, title, created_at)
+                   VALUES (1, 10, $1, $1, $2, $3)""",
+                f"https://example.com/{title}", title, at(saved),
+            )
+
+        async def get_channel(guild_id):
+            return channel
+
+        # the bot was down at 09:00 and comes back at 12:16
+        return await drops.run_due_drops(pool, at("2026-11-18 12:16"), get_channel)
+
+    assert loop.run_until_complete(go()) == 1
+    assert any("older" in m for m in channel.sent) and not any("fresh" in m for m in channel.sent)
