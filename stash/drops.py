@@ -114,7 +114,7 @@ def format_pick(n: int, link: Candidate, credit: bool = False) -> str:
     if link.reading_minutes:
         details.append(f"⏱️ {link.reading_minutes} min read")
     if link.tags:
-        details.append(", ".join(link.tags))
+        details.append(" ".join(hashtag(t) for t in link.tags))
     if credit and link.saver:
         details.append(f"saved by <@{link.saver}>")
     lines = [f"**{n}. {title}**"]
@@ -122,6 +122,11 @@ def format_pick(n: int, link: Candidate, credit: bool = False) -> str:
         lines.append("-# " + " · ".join(details))
     lines.append(link.url)
     return "\n".join(lines)
+
+
+def hashtag(tag: str) -> str:
+    """"soft skills" -> "#soft-skills" """
+    return "#" + "-".join(tag.split())
 
 
 def drop_header(day: str, user_id: int, group: bool) -> str:
