@@ -1,7 +1,7 @@
 """#10: two fake servers and two fake people. nobody may see or change anyone else's data.
 
-server 1: ama (10) and kofi (20)
-server 2: ama (10) again, a different server she's also in
+server 1 is kofi's (20). he invited his friend ama (10), so they share it.
+server 2 is ama's own. so ama is in both servers, and kofi only in his.
 """
 
 import itertools
