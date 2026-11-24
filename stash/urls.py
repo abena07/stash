@@ -9,6 +9,10 @@ TRAILING = ".,;:!?'\"*|"
 BRACKETS = {")": "(", "]": "["}
 
 TRACKING_PARAMS = {"fbclid", "gclid", "mc_cid", "mc_eid", "ref", "si"}
+# share-sheet junk some apps add (substack's iOS share adds all three)
+SHARE_PARAMS = {"sharepagevariant", "shareimagevariant", "triedredirect", "showwelcomeonshare"}
+# substack's ?r= is the sharer's referral id: personal, so it shouldn't end up in a drop
+SUBSTACK_PARAMS = {"r"}
 
 
 def extract_urls(text: str) -> list[str]:
@@ -36,6 +40,24 @@ def normalize(url: str) -> str:
         if not (k.lower().startswith("utm_") or k.lower() in TRACKING_PARAMS)
     )
     return urlunsplit(("https", host, parts.path.rstrip("/"), urlencode(query), ""))
+
+
+def _is_tracking(key: str, host: str) -> bool:
+    key = key.lower()
+    if key.startswith("utm_") or key in TRACKING_PARAMS or key in SHARE_PARAMS:
+        return True
+    return key in SUBSTACK_PARAMS and (host == "substack.com" or host.endswith(".substack.com"))
+
+
+def clean(url: str) -> str:
+    """the url without tracking and share parameters, otherwise exactly as posted.
+    this is what gets stored and shown in drops."""
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    host = (parts.hostname or "").lower()
+    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not _is_tracking(k, host)]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
 
 
 def _trim(url: str) -> str:

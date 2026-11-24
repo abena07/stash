@@ -21,6 +21,7 @@ import discord
 from . import buttons
 from .metadata import display_title
 from .modes import GROUP, SHARED
+from .urls import clean
 
 log = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ def format_pick(n: int, link: Candidate, credit: bool = False) -> str:
     lines = [f"**{n}. {title}**"]
     if details:
         lines.append("-# " + " · ".join(details))
-    lines.append(link.url)
+    lines.append(clean(link.url))  # links saved before urls were cleaned on save
     return "\n".join(lines)
 
 
