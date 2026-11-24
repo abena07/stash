@@ -71,11 +71,11 @@ def test_normalize_output():
 @pytest.mark.parametrize(
     "url, expected",
     [
-        # the substack ios share link from a real drop: referral id and share junk go
+        # a substack ios share link: referral id and share junk go
         (
-            "https://jessicananaadjoaasamoah.substack.com/p/the-trap-of-emotional-utility"
+            "https://someone.substack.com/p/a-post"
             "?r=80o2rq&utm_medium=ios&shareImageVariant=solid",
-            "https://jessicananaadjoaasamoah.substack.com/p/the-trap-of-emotional-utility",
+            "https://someone.substack.com/p/a-post",
         ),
         ("https://example.com/a?utm_source=x&id=7", "https://example.com/a?id=7"),
         ("https://example.com/a?fbclid=abc", "https://example.com/a"),
