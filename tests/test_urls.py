@@ -1,6 +1,6 @@
 import pytest
 
-from stash.urls import extract_urls, normalize
+from stash.urls import clean, extract_urls, normalize
 
 
 @pytest.mark.parametrize(
@@ -66,3 +66,25 @@ def test_normalize_output():
         normalize("http://www.Example.com:80/post/?b=2&utm_campaign=z&a=1#top")
         == "https://example.com/post?a=1&b=2"
     )
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        # the substack ios share link from a real drop: referral id and share junk go
+        (
+            "https://jessicananaadjoaasamoah.substack.com/p/the-trap-of-emotional-utility"
+            "?r=80o2rq&utm_medium=ios&shareImageVariant=solid",
+            "https://jessicananaadjoaasamoah.substack.com/p/the-trap-of-emotional-utility",
+        ),
+        ("https://example.com/a?utm_source=x&id=7", "https://example.com/a?id=7"),
+        ("https://example.com/a?fbclid=abc", "https://example.com/a"),
+        # r= only means referral on substack: kept elsewhere
+        ("https://example.com/search?r=10", "https://example.com/search?r=10"),
+        # untouched: no query, fragments, case and trailing slashes as posted
+        ("https://Example.com/Path/", "https://Example.com/Path/"),
+        ("https://example.com/a?x=1#part", "https://example.com/a?x=1#part"),
+    ],
+)
+def test_clean(url, expected):
+    assert clean(url) == expected

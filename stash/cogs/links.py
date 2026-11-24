@@ -7,7 +7,7 @@ import discord
 from discord.ext import commands
 
 from .. import keys, metadata, modes, providers, tagging
-from ..urls import extract_urls, normalize
+from ..urls import clean, extract_urls, normalize
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def save_links(
     """
     by_key = {}
     for url in urls:
-        by_key.setdefault(normalize(url), url)
+        by_key.setdefault(normalize(url), clean(url))
 
     shared = await modes.is_shared(pool, message.guild.id)
     new, dupes = [], []

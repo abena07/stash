@@ -17,7 +17,7 @@ from .metadata import display_title
 log = logging.getLogger(__name__)
 
 MAX_ROWS = 5  # discord allows 5 rows of buttons, so 5 picks get buttons
-TITLE_IN_BUTTON = 45  # characters of the title shown on a button
+TITLE_IN_BUTTON = 28  # short enough that [✅ title] [👍🏿 love] fit on one row on a phone
 READ_MARK = "✅ read"
 LOVED_MARK = f"{reactions.LOVED} loved"
 
