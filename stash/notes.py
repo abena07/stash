@@ -1,4 +1,7 @@
-"""notes (#5): messages posted in a saved link's thread are kept as notes on the link.
+"""notes (#5): messages in a thread started on a saved post are kept as notes on the link.
+
+stash opens the thread on its own reply so it stays out of people's sidebars.
+a thread someone starts on the post itself also works: it shares the post's message id.
 
 a post with several links gets one thread (discord allows one per message),
 so its notes attach to the first of those links.
@@ -10,7 +13,8 @@ import asyncpg
 async def save(pool: asyncpg.Pool, thread_id: int, message_id: int, author_id: int,
                content: str) -> bool:
     """store a thread message as a note. returns False if the thread isn't a notes thread."""
-    link_id = await pool.fetchval("SELECT min(id) FROM links WHERE thread_id = $1", thread_id)
+    link_id = await pool.fetchval("SELECT min(id) FROM links WHERE thread_id = $1 OR source_message_id = $1", thread_id
+    )
     if link_id is None or not content.strip():
         return False
     await pool.execute(
@@ -40,6 +44,8 @@ async def delete_thread(pool: asyncpg.Pool, thread_id: int) -> None:
     """the thread itself was deleted: forget it and its notes, keep the link."""
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute(
-            "DELETE FROM notes WHERE link_id IN (SELECT id FROM links WHERE thread_id = $1)", thread_id
+            """DELETE FROM notes WHERE link_id IN
+               (SELECT id FROM links WHERE thread_id = $1 OR source_message_id = $1)""",
+            thread_id,
         )
         await conn.execute("UPDATE links SET thread_id = NULL WHERE thread_id = $1", thread_id)
