@@ -215,10 +215,16 @@ class Links(commands.Cog):
 
     async def _open_thread(self, message: discord.Message, new: list[tuple[int, str]],
                            title: str | None) -> None:
-        """one notes thread per message (discord allows one), named after its first link (#5)."""
+        """one notes thread per post, named after its first link (#5).
+
+        the thread hangs off a quiet reply from stash, not the person's own message:
+        discord adds a message's author to any thread started on it, which would put
+        every saved link in their sidebar. this way they only join if they write a note.
+        """
         first_url = new[0][1]
         try:
-            thread = await message.create_thread(
+            reply = await message.reply("📝 notes", mention_author=False, silent=True)
+            thread = await reply.create_thread(
                 name=thread_name(title, first_url), auto_archive_duration=THREAD_ARCHIVE_MINUTES
             )
         except discord.HTTPException as e:

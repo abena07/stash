@@ -97,3 +97,23 @@ def test_deleting_the_thread_keeps_the_link(database):
         return link["thread_id"], await all_notes(pool)
 
     assert loop.run_until_complete(go()) == (None, [])
+
+
+def test_a_thread_someone_starts_on_a_saved_post_takes_notes(database):
+    # a thread started on the post itself shares the post's message id
+    loop, pool = database
+
+    async def go():
+        await pool.execute("INSERT INTO guilds (guild_id) VALUES (1)")
+        link_id = await pool.fetchval(
+            """INSERT INTO links (guild_id, user_id, url, url_normalized, source_message_id)
+               VALUES (1, 10, 'https://example.com/a', 'https://example.com/a', 800) RETURNING id"""
+        )
+        assert await notes.save(pool, 800, 1, 10, "worth it")
+        saved = await all_notes(pool)
+        await notes.delete_thread(pool, 800)
+        return link_id, saved, await all_notes(pool)
+
+    link_id, saved, after_delete = loop.run_until_complete(go())
+    assert saved == [(link_id, 10, 1, "worth it")]
+    assert after_delete == []
